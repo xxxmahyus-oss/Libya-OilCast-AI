@@ -113,7 +113,7 @@ def model_bank(seed):
         "Extra Trees": ExtraTreesRegressor(n_estimators=220, min_samples_leaf=2, random_state=seed, n_jobs=-1),
         "Hist Gradient Boosting": HistGradientBoostingRegressor(max_iter=180, learning_rate=0.07, random_state=seed)
     }
-
+@st.cache_resource(show_spinner=False)
 def evaluate_models(df, seed=42):
     feature_frames = []
     for well, group in df.groupby("well"):
