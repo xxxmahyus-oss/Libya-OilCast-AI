@@ -109,8 +109,8 @@ def add_features(one):
 def model_bank(seed):
     return {
         "Linear Regression": LinearRegression(),
-        "Random Forest": RandomForestRegressor(n_estimators=220, min_samples_leaf=2, random_state=seed, n_jobs=-1),
-        "Extra Trees": ExtraTreesRegressor(n_estimators=220, min_samples_leaf=2, random_state=seed, n_jobs=-1),
+        "Random Forest": RandomForestRegressor(n_estimators=100, min_samples_leaf=2, random_state=seed, n_jobs=1),
+        "Extra Trees": ExtraTreesRegressor(n_estimators=100, min_samples_leaf=2, random_state=seed, n_jobs=1),
         "Hist Gradient Boosting": HistGradientBoostingRegressor(max_iter=180, learning_rate=0.07, random_state=seed)
     }
 @st.cache_resource(show_spinner=False)
