@@ -411,12 +411,24 @@ seed = st.sidebar.number_input("Seed للبيانات", min_value=1, max_value=9
 st.sidebar.caption("البيانات الافتراضية محاكاة تعليمية وليست بيانات حقيقية من ليبيا.")
 
 synthetic = make_synthetic_data(n_wells, n_days, int(seed))
+
 if "uploaded_data" not in st.session_state:
-    st.session_state.uploaded_data = None
-use_uploaded = st.sidebar.toggle("استخدام بيانات CSV المرفوعة", value=False)
+     st.session_state.uploaded_data = None
+
+if "use_uploaded_data" not in st.session_state:
+    st.session_state.use_uploaded_data = False
+
+use_uploaded = st.sidebar.toggle(
+    "استخدام البيانات المرفوعة",
+    value=st.session_state.use_uploaded_data,
+    key="uploaded_data_toggle"
+)
+
+st.session_state.use_uploaded_data = use_uploaded
+
 if use_uploaded and st.session_state.uploaded_data is not None:
     raw = st.session_state.uploaded_data.copy()
-    data_source = "Imported CSV"
+    data_source = "Imported CSV/Excel"
 else:
     raw = synthetic.copy()
     data_source = "Synthetic demo data"
@@ -692,40 +704,219 @@ elif page == "التنبؤ المستقبلي":
                                file_name=f"forecast_{chosen_well.lower()}.csv", mime="text/csv")
             st.caption("هذا توقع أحادي الخطوة تكراري؛ عدم اليقين يتراكم كلما طال أفق التنبؤ، والخصائص التشغيلية المستقبلية تُثبَّت عند آخر قراءة.")
 
+
 elif page == "البيانات والتصدير":
-    st.subheader("رفع بيانات حقيقية أو تنزيل بيانات العرض")
+    st.subheader("رفع البيانات ومعاينتها وفحص جودتها")
+
     st.markdown("""
-يُفضّل أن يحتوي CSV على الأعمدة التالية:
-- `date`: التاريخ بصيغة مثل `2025-01-31`
-- `oil_production_bopd`: إنتاج النفط بوحدة برميل/يوم
-- `well`: معرّف البئر
-- `field`: اسم الحقل (اختياري)
-- `water_cut_pct`, `pressure_psi`, `choke_pct`, `uptime_pct` (اختيارية؛ تُملأ بقيم افتراضية إن غابت)
-""")
-    upload = st.file_uploader("ارفع ملف CSV", type=["csv"])
+    **الأعمدة المطلوبة:**
+    - `date`: تاريخ القراءة.
+    - `oil_production_bopd`: إنتاج النفط بوحدة برميل/يوم.
+
+    **الأعمدة الاختيارية:**
+    - `well`: اسم أو رقم البئر.
+    - `field`: اسم الحقل.
+    - `water_cut_pct`, `pressure_psi`, `choke_pct`, `uptime_pct`.
+    """)
+
+    upload = st.file_uploader(
+        "ارفع ملف البيانات",
+        type=["csv", "xlsx", "xls"],
+        help="يمكنك رفع ملف CSV أو Excel."
+    )
+
     if upload is not None:
         try:
-            candidate = pd.read_csv(upload)
-            st.write("معاينة الملف", candidate.head())
-            required = {"date","oil_production_bopd"}
-            if not required.issubset(candidate.columns):
-                st.error("الأعمدة date و oil_production_bopd مطلوبة بالأسماء نفسها. عدّل أسماء الأعمدة في CSV ثم ارفعه من جديد.")
+            if upload.name.lower().endswith(".csv"):
+                candidate = pd.read_csv(upload)
             else:
-                if st.button("اعتماد الملف في الجلسة"):
-                    st.session_state.uploaded_data = candidate
-                    st.success("تم اعتماد البيانات لهذه الجلسة. فعّل خيار استخدام بيانات CSV في الشريط الجانبي.")
-        except Exception as e:
-            st.error(f"تعذر قراءة CSV: {e}")
+                candidate = pd.read_excel(upload)
+
+            candidate.columns = (
+                candidate.columns.astype(str).str.strip()
+            )
+
+            st.markdown("### 1. معاينة البيانات")
+            st.caption(
+                f"عدد الصفوف: {len(candidate):,} | "
+                f"عدد الأعمدة: {len(candidate.columns)}"
+            )
+
+            st.dataframe(
+                candidate.head(20),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.markdown("### 2. فحص الأعمدة")
+            required = {
+                "date",
+                "oil_production_bopd"
+            }
+
+            missing = required - set(candidate.columns)
+
+            if missing:
+                st.error(
+                    "الأعمدة المطلوبة غير موجودة: "
+                    + ", ".join(sorted(missing))
+                )
+                st.info(
+                    "تأكد من أسماء الأعمدة كما هي مكتوبة "
+                    "في وصف تنسيق البيانات أعلاه."
+                )
+            else:
+                st.success("الأعمدة المطلوبة موجودة.")
+
+                st.markdown("### 3. فحص جودة البيانات")
+
+                quality = pd.DataFrame({
+                    "العمود": candidate.columns,
+                    "نوع البيانات": [
+                        str(candidate[c].dtype)
+                        for c in candidate.columns
+                    ],
+                    "القيم المفقودة": [
+                        int(candidate[c].isna().sum())
+                        for c in candidate.columns
+                    ],
+                    "القيم الفريدة": [
+                        int(candidate[c].nunique())
+                        for c in candidate.columns
+                    ]
+                })
+
+                st.dataframe(
+                    quality,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                try:
+                    parsed_dates = pd.to_datetime(
+                        candidate["date"],
+                        errors="coerce"
+                    )
+                    production = pd.to_numeric(
+                        candidate["oil_production_bopd"],
+                        errors="coerce"
+                    )
+
+                    invalid_dates = int(parsed_dates.isna().sum())
+                    invalid_production = int(
+                        production.isna().sum()
+                    )
+                    negative_production = int(
+                        (production < 0).sum()
+                    )
+
+                    duplicate_rows = int(
+                        candidate.duplicated().sum()
+                    )
+
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("تواريخ غير صالحة", invalid_dates)
+                    c2.metric(
+                        "إنتاج غير رقمي أو مفقود",
+                        invalid_production
+                    )
+                    c3.metric(
+                        "إنتاج سالب",
+                        negative_production
+                    )
+                    c4.metric("صفوف مكررة", duplicate_rows)
+
+                    if (
+                        invalid_dates
+                        or invalid_production
+                        or negative_production
+                    ):
+                        st.warning(
+                            "توجد مشكلات في البيانات. "
+                            "سيتم استبعاد التواريخ والإنتاج غير "
+                            "الصالحين، لكن راجع القيم السالبة "
+                            "والبيانات المفقودة قبل اعتماد النتائج."
+                        )
+                    else:
+                        st.success(
+                            "اجتازت التواريخ وقيم الإنتاج "
+                            "الفحوص الأساسية."
+                        )
+
+                    if st.button(
+                        "اعتماد البيانات واستخدامها في المشروع",
+                        type="primary"
+                    ):
+                        cleaned = candidate.copy()
+                        cleaned["date"] = parsed_dates
+                        cleaned["oil_production_bopd"] = production
+
+                        cleaned = cleaned.dropna(
+                            subset=[
+                                "date",
+                                "oil_production_bopd"
+                            ]
+                        )
+
+                        cleaned = cleaned[
+                            cleaned["oil_production_bopd"] >= 0
+                        ]
+
+                        if cleaned.empty:
+                            st.error(
+                                "لا توجد قراءات صالحة بعد التنظيف."
+                            )
+                        else:
+                            st.session_state.uploaded_data = cleaned
+                            st.session_state.use_uploaded_data = True
+                            st.success(
+                                "تم اعتماد البيانات. "
+                                "أعد تشغيل التطبيق إذا لم تتحدث "
+                                "الصفحات الأخرى تلقائياً."
+                            )
+                            st.rerun()
+
+                except Exception as exc:
+                    st.error(f"تعذر فحص البيانات: {exc}")
+
+        except Exception as exc:
+            st.error(
+                f"تعذر قراءة الملف. تأكد من سلامته وتنسيقه: {exc}"
+            )
+
     st.divider()
     st.markdown("### تنزيل البيانات الافتراضية")
-    st.download_button("تنزيل البيانات الافتراضية CSV", synthetic.to_csv(index=False).encode("utf-8-sig"),
-                       file_name="synthetic_oilfield_data.csv", mime="text/csv")
+
+    st.download_button(
+        "تنزيل البيانات الافتراضية CSV",
+        synthetic.to_csv(index=False).encode("utf-8-sig"),
+        file_name="synthetic_oilfield_data.csv",
+        mime="text/csv"
+    )
+
     st.markdown("### تصدير تقرير PDF")
+
     if st.button("إنشاء تقرير PDF"):
-        pdf = make_pdf_report("Libya OilCast AI — Oil Production Forecast Report", metrics, pd.DataFrame())
+        pdf = make_pdf_report(
+            "Libya OilCast AI — Oil Production Forecast Report",
+            metrics,
+            pd.DataFrame()
+        )
+
         if pdf:
-            st.download_button("تنزيل التقرير PDF", pdf, file_name="libya_oilcast_report.pdf", mime="application/pdf")
-    st.dataframe(df.head(100), use_container_width=True, hide_index=True)
+            st.download_button(
+                "تنزيل التقرير PDF",
+                pdf,
+                file_name="libya_oilcast_report.pdf",
+                mime="application/pdf"
+            )
+
+    st.markdown("### البيانات المستخدمة حالياً")
+    st.dataframe(
+        df.head(100),
+        use_container_width=True,
+        hide_index=True
+    )
 
 elif page == "عن المشروع":
     st.subheader("عن Libya OilCast AI")
