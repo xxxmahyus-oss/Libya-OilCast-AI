@@ -795,24 +795,105 @@ elif page == "البيانات والتصدير":
             )
 
             st.markdown("### 2. فحص الأعمدة")
-            required = {
-                "date",
-                "oil_production_bopd"
-            }
+                       detected = detect_oil_columns(candidate)
 
-            missing = required - set(candidate.columns)
+            st.markdown("### 2. تحديد الأعمدة تلقائياً")
 
-            if missing:
-                st.error(
-                    "الأعمدة المطلوبة غير موجودة: "
-                    + ", ".join(sorted(missing))
-                )
-                st.info(
-                    "تأكد من أسماء الأعمدة كما هي مكتوبة "
-                    "في وصف تنسيق البيانات أعلاه."
-                )
+            date_options = ["— اختر العمود —"] + list(candidate.columns)
+            production_options = ["— اختر العمود —"] + list(candidate.columns)
+
+            date_default = (
+                date_options.index(detected["date"])
+                if detected.get("date") in candidate.columns
+                else 0
+            )
+
+            production_default = (
+                production_options.index(detected["oil_production_bopd"])
+                if detected.get("oil_production_bopd") in candidate.columns
+                else 0
+            )
+
+            date_col = st.selectbox(
+                "أي عمود يمثل التاريخ؟",
+                date_options,
+                index=date_default,
+                key="detected_date_column"
+            )
+
+            production_col = st.selectbox(
+                "أي عمود يمثل إنتاج النفط؟",
+                production_options,
+                index=production_default,
+                key="detected_production_column"
+            )
+
+            well_col = st.selectbox(
+                "عمود اسم البئر (اختياري)",
+                ["بدون"] + list(candidate.columns),
+                index=(
+                    1 + list(candidate.columns).index(detected["well"])
+                    if detected.get("well") in candidate.columns
+                    else 0
+                ),
+                key="detected_well_column"
+            )
+
+            field_col = st.selectbox(
+                "عمود اسم الحقل (اختياري)",
+                ["بدون"] + list(candidate.columns),
+                index=(
+                    1 + list(candidate.columns).index(detected["field"])
+                    if detected.get("field") in candidate.columns
+                    else 0
+                ),
+                key="detected_field_column"
+            )
+
+            if date_col != "— اختر العمود —" and production_col != "— اختر العمود —":
+                st.success("تم تحديد عمود التاريخ وعمود الإنتاج.")
+
+                st.markdown("### 3. فحص البيانات")
+
+                if st.button(
+                    "اعتماد البيانات واستخدامها في المشروع",
+                    type="primary"
+                ):
+                    cleaned = candidate.copy()
+
+                    cleaned["date"] = pd.to_datetime(
+                        cleaned[date_col], errors="coerce"
+                    )
+
+                    cleaned["oil_production_bopd"] = pd.to_numeric(
+                        cleaned[production_col], errors="coerce"
+                    )
+
+                    if well_col != "بدون":
+                        cleaned["well"] = cleaned[well_col].astype(str)
+
+                    if field_col != "بدون":
+                        cleaned["field"] = cleaned[field_col].astype(str)
+
+                    cleaned = cleaned.dropna(
+                        subset=["date", "oil_production_bopd"]
+                    )
+
+                    cleaned = cleaned[
+                        cleaned["oil_production_bopd"] >= 0
+                    ]
+
+                    if cleaned.empty:
+                        st.error("لم نجد بيانات صالحة للاستخدام.")
+                    else:
+                        st.session_state.uploaded_data = cleaned
+                        st.session_state.use_uploaded_data = True
+                        st.session_state.uploaded_data_toggle = True
+                        st.success("تم اعتماد البيانات بنجاح.")
+                        st.rerun()
+
             else:
-                st.success("الأعمدة المطلوبة موجودة.")
+                st.warning("اختر عمود التاريخ وعمود إنتاج النفط للمتابعة.")
 
                 st.markdown("### 3. فحص جودة البيانات")
 
