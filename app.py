@@ -888,7 +888,7 @@ elif page == "البيانات والتصدير":
                     else:
                         st.session_state.uploaded_data = cleaned
                         st.session_state.use_uploaded_data = True
-                        st.session_state.uploaded_data_toggle = True
+                
                         st.success("تم اعتماد البيانات بنجاح.")
                         st.rerun()
 
