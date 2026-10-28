@@ -795,7 +795,7 @@ elif page == "البيانات والتصدير":
             )
 
             st.markdown("### 2. فحص الأعمدة")
-                       detected = detect_oil_columns(candidate)
+            detected = detect_oil_columns(candidate)
 
             st.markdown("### 2. تحديد الأعمدة تلقائياً")
 
