@@ -70,8 +70,54 @@ def make_synthetic_data(n_wells=8, n_days=900, seed=42):
 
 FEATURES = ["day_index", "lag_1", "lag_7", "lag_14", "lag_30",
             "rolling_mean_7", "rolling_mean_30", "water_cut_pct",
-            "pressure_psi", "choke_pct", "uptime_pct", "month"]
+            "pressure_psi", "choke_pct", "uptime_pct", "month"] 
 
+def detect_oil_columns(df): 
+    """Detect likely date, oil production, well, and field columns."""
+    import re
+
+    def normalize(name):
+        name = str(name).strip().lower()
+        name = re.sub(r"[\s\-/]+", "_", name)
+        return name
+
+    aliases = {
+        "date": [
+            "date", "datetime", "time", "timestamp",
+            "التاريخ", "تاريخ", "اليوم"
+        ],
+        "oil_production_bopd": [
+            "oil_production_bopd", "oil_rate", "oil_production",
+            "oil_rate_bopd", "bopd", "oil", "production",
+            "daily_oil_production", "oil_volume",
+            "إنتاج_النفط", "الانتاج", "إنتاج", "النفط"
+        ],
+        "well": [
+            "well", "well_name", "well_id", "well_number",
+            "البئر", "اسم_البئر", "رقم_البئر"
+        ],
+        "field": [
+            "field", "field_name", "oilfield",
+            "الحقل", "اسم_الحقل"
+        ],
+    }
+
+    normalized_columns = {
+        col: normalize(col) for col in df.columns
+    }
+
+    detected = {}
+
+    for target, names in aliases.items():
+        matches = [
+            col for col, normalized in normalized_columns.items()
+            if normalized in names
+        ]
+        if matches:
+            detected[target] = matches[0]
+
+    return detected 
+    
 def prepare_well_data(df):
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
