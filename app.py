@@ -243,6 +243,86 @@ def evaluate_models(df, seed=42):
         "test_metrics": test_metrics
     }
 
+
+def walk_forward_validation(df, seed=42, n_splits=3):
+    feature_frames = []
+
+    for well, group in df.groupby("well"):
+        f = add_features(group)
+        if not f.empty:
+            feature_frames.append(f)
+
+    if not feature_frames:
+        return pd.DataFrame()
+
+    data = pd.concat(feature_frames, ignore_index=True)
+    data = data.sort_values(["date", "well"]).reset_index(drop=True)
+
+    dates = np.sort(data["date"].unique())
+    initial_size = int(len(dates) * 0.50)
+
+    if len(dates) < 60 or len(dates) - initial_size < n_splits:
+        return pd.DataFrame()
+
+    later_dates = dates[initial_size:]
+    date_folds = [
+        fold for fold in np.array_split(later_dates, n_splits)
+        if len(fold) > 0
+    ]
+
+    predictions = []
+
+    for fold_number, fold_dates in enumerate(date_folds, start=1):
+        train = data[data["date"] < fold_dates[0]]
+        valid = data[data["date"].isin(fold_dates)]
+
+        if len(train) < 20 or valid.empty:
+            continue
+
+        X_train = train[FEATURES]
+        y_train = train["oil_production_bopd"]
+        X_valid = valid[FEATURES]
+        y_valid = valid["oil_production_bopd"]
+
+        baseline_pred = valid["lag_1"].to_numpy()
+
+        for name, model in model_bank(seed).items():
+            model.fit(X_train, y_train)
+            pred = np.maximum(0, model.predict(X_valid))
+
+            predictions.append({
+                "Fold": fold_number,
+                "Model": name,
+                "MAE": mean_absolute_error(y_valid, pred),
+                "RMSE": np.sqrt(mean_squared_error(y_valid, pred)),
+                "R²": (
+                    r2_score(y_valid, pred)
+                    if y_valid.nunique() > 1 else np.nan
+                ),
+                "Samples": len(valid)
+            })
+
+        predictions.append({
+            "Fold": fold_number,
+            "Model": "Persistence Baseline",
+            "MAE": mean_absolute_error(y_valid, baseline_pred),
+            "RMSE": np.sqrt(
+                mean_squared_error(y_valid, baseline_pred)
+            ),
+            "R²": (
+                r2_score(y_valid, baseline_pred)
+                if y_valid.nunique() > 1 else np.nan
+            ),
+            "Samples": len(valid)
+        })
+
+    if not predictions:
+        return pd.DataFrame()
+
+    return pd.DataFrame(predictions)
+
+
+
 def forecast_one_well(group, model, horizon):
     hist = group.sort_values("date").copy().reset_index(drop=True)
     if len(hist) < 31:
@@ -519,7 +599,62 @@ elif page == "تدريب ومقارنة النماذج":
             file_name="model_metrics.csv",
             mime="text/csv"
         )
+        
+        st.markdown("### الاختبار الزمني المتكرر (Walk-Forward Validation)")
 
+        with st.spinner("جاري اختبار النماذج عبر 3 فترات زمنية..."):
+            wf_results = walk_forward_validation(
+                df,
+                seed=int(seed),
+                n_splits=3
+            )
+
+        if wf_results.empty:
+            st.warning(
+                "تعذر إجراء الاختبار الزمني المتكرر. "
+                "تأكد من توفر بيانات كافية."
+            )
+        else:
+            st.markdown("#### نتائج كل فترة زمنية")
+
+            st.dataframe(
+                wf_results.round(3),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            wf_summary = (
+                wf_results.groupby("Model", as_index=False)
+                .agg(
+                    Mean_MAE=("MAE", "mean"),
+                    Mean_RMSE=("RMSE", "mean"),
+                    Mean_R2=("R²", "mean")
+                )
+                .sort_values("Mean_RMSE")
+                .reset_index(drop=True)
+            )
+
+            st.markdown("#### متوسط أداء النماذج عبر الفترات الثلاث")
+
+            st.dataframe(
+                wf_summary.round(3),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            fig_wf = px.bar(
+                wf_summary,
+                x="Model",
+                y="Mean_RMSE",
+                title="متوسط RMSE عبر الفترات الزمنية — الأقل أفضل"
+            )
+
+            fig_wf.update_layout(
+                xaxis_title="النموذج",
+                yaxis_title="متوسط RMSE (BOPD)"
+            )
+
+            st.plotly_chart(fig_wf, use_container_width=True)
 
 elif page == "التنبؤ المستقبلي":
     st.subheader("تنبؤ إنتاج البئر للأيام القادمة")
