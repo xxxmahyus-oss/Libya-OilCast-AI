@@ -116,45 +116,132 @@ def model_bank(seed):
 @st.cache_resource(show_spinner=False)
 def evaluate_models(df, seed=42):
     feature_frames = []
+
     for well, group in df.groupby("well"):
         f = add_features(group)
-        feature_frames.append(f)
+        if not f.empty:
+            feature_frames.append(f)
+
     if not feature_frames:
         return pd.DataFrame(), pd.DataFrame(), {}
+
     data = pd.concat(feature_frames, ignore_index=True)
-    if len(data) < 35:
+    data = data.sort_values(["date", "well"]).reset_index(drop=True)
+
+    if len(data) < 60:
         return pd.DataFrame(), data, {}
-    data = data.sort_values("date")
-    split_date = data["date"].quantile(0.8)
-    train = data[data["date"] <= split_date]
-    test = data[data["date"] > split_date]
-    if len(train) < 20 or len(test) < 5:
-        cut = int(len(data)*0.8)
-        train, test = data.iloc[:cut], data.iloc[cut:]
+
+    # Split chronologically into training, validation, and final test sets.
+    dates = np.sort(data["date"].unique())
+
+    if len(dates) < 10:
+        return pd.DataFrame(), data, {}
+
+    train_cut = int(len(dates) * 0.60)
+    val_cut = int(len(dates) * 0.80)
+
+    train_dates = dates[:train_cut]
+    val_dates = dates[train_cut:val_cut]
+    test_dates = dates[val_cut:]
+
+    train = data[data["date"].isin(train_dates)]
+    val = data[data["date"].isin(val_dates)]
+    test = data[data["date"].isin(test_dates)]
+
+    if len(train) < 20 or len(val) < 5 or len(test) < 5:
+        return pd.DataFrame(), data, {}
+
     X_train, y_train = train[FEATURES], train["oil_production_bopd"]
-    X_test, y_test = test[FEATURES], test["oil_production_bopd"]
-    rows, fitted = [], {}
-    # Persistence baseline: next day's production equals the most recent known day.
-    baseline = test["lag_1"].to_numpy()
-    rows.append({"Model":"Persistence Baseline", "MAE":mean_absolute_error(y_test, baseline),
-                 "RMSE":np.sqrt(mean_squared_error(y_test, baseline)),
-                 "R²":r2_score(y_test, baseline) if y_test.nunique()>1 else np.nan})
+    X_val, y_val = val[FEATURES], val["oil_production_bopd"]
+
+    rows = []
+    validation_scores = {}
+    validation_models = {}
+
+    # Persistence baseline: predict using the latest observed production.
+    baseline_val = val["lag_1"].to_numpy()
+
+    rows.append({
+        "Model": "Persistence Baseline",
+        "MAE": mean_absolute_error(y_val, baseline_val),
+        "RMSE": np.sqrt(mean_squared_error(y_val, baseline_val)),
+        "R²": r2_score(y_val, baseline_val) if y_val.nunique() > 1 else np.nan
+    })
+
     for name, model in model_bank(seed).items():
         model.fit(X_train, y_train)
-        pred = np.maximum(0, model.predict(X_test))
-        rows.append({"Model":name, "MAE":mean_absolute_error(y_test, pred),
-                     "RMSE":np.sqrt(mean_squared_error(y_test, pred)),
-                     "R²":r2_score(y_test, pred) if y_test.nunique()>1 else np.nan})
-        fitted[name] = model
+        pred_val = np.maximum(0, model.predict(X_val))
+
+        mae = mean_absolute_error(y_val, pred_val)
+        rmse = np.sqrt(mean_squared_error(y_val, pred_val))
+        r2 = r2_score(y_val, pred_val) if y_val.nunique() > 1 else np.nan
+
+        rows.append({
+            "Model": name,
+            "MAE": mae,
+            "RMSE": rmse,
+            "R²": r2
+        })
+
+        validation_scores[name] = rmse
+        validation_models[name] = model
+
     metrics = pd.DataFrame(rows).sort_values("RMSE").reset_index(drop=True)
-    best_name = metrics.iloc[0]["Model"]
+
+    # Select the model using validation data only.
+    baseline_rmse = rows[0]["RMSE"]
+    best_name = min(validation_scores, key=validation_scores.get)
+
+    if baseline_rmse < validation_scores[best_name]:
+        best_name = "Persistence Baseline"
+
+    # Refit the selected ML model using training + validation data.
+    if best_name != "Persistence Baseline":
+        final_model = model_bank(seed)[best_name]
+        training_data = pd.concat([train, val], ignore_index=True)
+        final_model.fit(
+            training_data[FEATURES],
+            training_data["oil_production_bopd"]
+        )
+    else:
+        final_model = None
+
+    # Evaluate once on the untouched final test period.
+    X_test = test[FEATURES]
+    y_test = test["oil_production_bopd"]
+
     if best_name == "Persistence Baseline":
-        best_name = min([x for x in fitted], key=lambda x: metrics.loc[metrics["Model"]==x, "RMSE"].iloc[0])
-    best_model = fitted[best_name]
-    test_predictions = test[["date","field","well","oil_production_bopd"]].copy()
-    test_predictions["predicted_oil_production_bopd"] = np.maximum(0, best_model.predict(test[FEATURES]))
+        test_pred = test["lag_1"].to_numpy()
+    else:
+        test_pred = np.maximum(0, final_model.predict(X_test))
+
+    test_metrics = {
+        "MAE": mean_absolute_error(y_test, test_pred),
+        "RMSE": np.sqrt(mean_squared_error(y_test, test_pred)),
+        "R²": r2_score(y_test, test_pred) if y_test.nunique() > 1 else np.nan
+    }
+
+    test_predictions = test[
+        ["date", "field", "well", "oil_production_bopd"]
+    ].copy()
+
+    test_predictions["predicted_oil_production_bopd"] = test_pred
     test_predictions["model"] = best_name
-    return metrics, test_predictions, {"models":fitted, "best_name":best_name, "features":FEATURES, "feature_data":data}
+
+    fitted = {
+        name: model for name, model in validation_models.items()
+    }
+
+    if final_model is not None:
+        fitted[best_name] = final_model
+
+    return metrics, test_predictions, {
+        "models": fitted,
+        "best_name": best_name,
+        "features": FEATURES,
+        "feature_data": data,
+        "test_metrics": test_metrics
+    }
 
 def forecast_one_well(group, model, horizon):
     hist = group.sort_values("date").copy().reset_index(drop=True)
@@ -324,32 +411,115 @@ elif page == "تحليل الإنتاج":
         st.plotly_chart(fig, use_container_width=True)
     st.caption("الارتباطات المرئية لا تثبت السببية. تأكد من وحدات القياس وجودة البيانات قبل تفسيرها هندسياً.")
 
+
 elif page == "تدريب ومقارنة النماذج":
     st.subheader("تقييم النماذج على فترة اختبار زمنية")
-    if metrics.empty:
-        st.error("البيانات غير كافية. نحتاج عادةً 60 قراءة يومية على الأقل لكل بئر، ويفضل أكثر.")
+
+    if metrics.empty or not evaluation:
+        st.error(
+            "البيانات غير كافية للتقييم. "
+            "تأكد من وجود قراءات يومية كافية لكل بئر."
+        )
     else:
-        st.dataframe(metrics.round(3), use_container_width=True, hide_index=True)
-        best = metrics.iloc[0]
-        c1,c2,c3 = st.columns(3)
-        c1.metric("أفضل نموذج حسب RMSE", str(best["Model"]))
-        c2.metric("RMSE", f"{best['RMSE']:.2f}")
-        c3.metric("MAE", f"{best['MAE']:.2f}")
-        fig = px.bar(metrics, x="Model", y="RMSE", title="مقارنة RMSE — الأقل أفضل")
-        fig.update_layout(xaxis_title="النموذج", yaxis_title="RMSE (BOPD)")
+        st.markdown("### نتائج التحقق واختيار النموذج")
+        st.dataframe(
+            metrics.round(3),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        best_name = evaluation["best_name"]
+        test_metrics = evaluation.get("test_metrics", {})
+
+        if best_name == "Persistence Baseline":
+            st.info(
+                "خط الأساس Persistence Baseline حقق أفضل نتيجة "
+                "على بيانات التحقق، ولم يتفوق عليه أي نموذج تعلم آلي."
+            )
+        else:
+            st.success(
+                f"النموذج المختار بناءً على بيانات التحقق: {best_name}"
+            )
+
+        st.markdown("### أداء النموذج على الاختبار النهائي")
+
+        if test_metrics:
+            c1, c2, c3 = st.columns(3)
+
+            c1.metric("النموذج المختار", best_name)
+            c2.metric(
+                "RMSE",
+                f"{test_metrics['RMSE']:.2f} BOPD"
+            )
+            c3.metric(
+                "MAE",
+                f"{test_metrics['MAE']:.2f} BOPD"
+            )
+        else:
+            st.warning("نتائج الاختبار النهائي غير متاحة.")
+
+        fig = px.bar(
+            metrics,
+            x="Model",
+            y="RMSE",
+            title="مقارنة RMSE على بيانات التحقق — الأقل أفضل"
+        )
+        fig.update_layout(
+            xaxis_title="النموذج",
+            yaxis_title="RMSE (BOPD)"
+        )
         st.plotly_chart(fig, use_container_width=True)
+
         if not test_preds.empty:
             available_wells = sorted(test_preds["well"].unique())
-            pred_well = st.selectbox("اختر بئراً لعرض الاختبار", available_wells)
-            p = test_preds[test_preds["well"]==pred_well].sort_values("date")
+            pred_well = st.selectbox(
+                "اختر بئراً لعرض الاختبار النهائي",
+                available_wells
+            )
+
+            p = test_preds[
+                test_preds["well"] == pred_well
+            ].sort_values("date")
+
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=p["date"], y=p["oil_production_bopd"], mode="lines", name="الإنتاج الفعلي"))
-            fig.add_trace(go.Scatter(x=p["date"], y=p["predicted_oil_production_bopd"], mode="lines", name="توقع النموذج"))
-            fig.update_layout(title=f"فعلي مقابل متوقع — {pred_well}", xaxis_title="التاريخ", yaxis_title="BOPD", hovermode="x unified")
+            fig.add_trace(
+                go.Scatter(
+                    x=p["date"],
+                    y=p["oil_production_bopd"],
+                    mode="lines",
+                    name="الإنتاج الفعلي"
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=p["date"],
+                    y=p["predicted_oil_production_bopd"],
+                    mode="lines",
+                    name="الإنتاج المتوقع"
+                )
+            )
+            fig.update_layout(
+                title=f"الإنتاج الفعلي مقابل المتوقع — {pred_well}",
+                xaxis_title="التاريخ",
+                yaxis_title="الإنتاج (BOPD)",
+                hovermode="x unified"
+            )
             st.plotly_chart(fig, use_container_width=True)
-        st.info("يُقسَّم التاريخ ترتيبياً إلى تدريب واختبار؛ لا تُستخدم عشوائية الصفوف. مع ذلك، نتائج البيانات الاصطناعية لا تمثل دقة متوقعة على حقول حقيقية.")
-        st.download_button("تنزيل جدول المقاييس CSV", metrics.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="model_metrics.csv", mime="text/csv")
+
+        st.info(
+            "يُختار النموذج باستخدام فترة التحقق، ثم يُقيّم مرة واحدة "
+            "على فترة اختبار نهائية لم تُستخدم في الاختيار. "
+            "النتائج الحالية تعتمد على بيانات اصطناعية، ولا تثبت "
+            "دقة النموذج على حقول نفطية حقيقية."
+        )
+
+        st.download_button(
+            "تنزيل جدول المقاييس CSV",
+            metrics.to_csv(index=False).encode("utf-8-sig"),
+            file_name="model_metrics.csv",
+            mime="text/csv"
+        )
+
 
 elif page == "التنبؤ المستقبلي":
     st.subheader("تنبؤ إنتاج البئر للأيام القادمة")
