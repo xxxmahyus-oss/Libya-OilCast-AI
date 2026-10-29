@@ -266,7 +266,7 @@ def model_bank(seed):
 def evaluate_models(df, seed=42):
     feature_frames = []
 
-    for well, group in df.groupby("well"):
+    for (field, well), group in df.groupby(["field", "well"]):
         f = add_features(group)
         if not f.empty:
             feature_frames.append(f)
@@ -411,10 +411,11 @@ def evaluate_models(df, seed=42):
         }
     }
 
+@st.cache_data(show_spinner=False)
 def walk_forward_validation(df, seed=42, n_splits=3):
     feature_frames = []
 
-    for well, group in df.groupby("well"):
+    for (field, well), group in df.groupby(["field", "well"]):
         f = add_features(group)
         if not f.empty:
             feature_frames.append(f)
@@ -516,14 +517,22 @@ def forecast_one_well(group, model, horizon):
         hist["oil_production_bopd"], errors="coerce"
     )
 
+    
     hist = hist.dropna(
         subset=["date", "oil_production_bopd"]
     ).reset_index(drop=True)
 
-    if len(hist) < 30 or horizon < 1:
-        return pd.DataFrame()
+    # استبعاد قراءات الإنتاج السالبة
+    hist = hist[
+        hist["oil_production_bopd"] >= 0
+    ].copy().reset_index(drop=True)
 
-    if hist["date"].nunique() < 30:
+    # التأكد من توفر تاريخ فريد وقراءات كافية
+    if (
+        len(hist) < 30
+        or hist["date"].nunique() < 30
+        or horizon < 1
+    ):
         return pd.DataFrame()
 
     numeric_columns = [
@@ -679,6 +688,11 @@ else:
     raw = synthetic.copy()
     data_source = "Synthetic demo data"
 
+if data_source == "Imported CSV/Excel":
+    st.info("مصدر البيانات الحالي: ملف مرفوع من المستخدم.")
+else:
+    st.info("مصدر البيانات الحالي: بيانات تجريبية مولّدة للعرض والاختبار.")
+    
 df = prepare_well_data(raw)
 fields = sorted(df["field"].dropna().unique().tolist())
 selected_field = st.sidebar.selectbox("الحقل", ["كل الحقول"] + fields)
@@ -707,6 +721,13 @@ if page in ["تدريب ومقارنة النماذج", "التنبؤ المست
     with st.spinner("جاري تجهيز خصائص السلاسل الزمنية وتقييم النماذج..."):
         metrics, test_preds, evaluation = evaluate_models(df, int(seed))
 
+    # إحصائيات البيانات المستخدمة
+    n_wells = df[["field", "well"]].drop_duplicates().shape[0]
+    n_fields = df["field"].nunique()
+
+    c1, c2 = st.columns(2)
+    c1.metric("عدد الآبار", n_wells)
+    c2.metric("عدد الحقول النفطية", n_fields)
 # ---------- Pages ----------
 if page == "نظرة عامة":
     total_prod = view_df.groupby("date")["oil_production_bopd"].sum()
@@ -786,20 +807,47 @@ elif page == "تدريب ومقارنة النماذج":
 
         st.markdown("### أداء النموذج على الاختبار النهائي")
 
+        if not test_preds.empty:
+            st.metric(
+                "عدد قراءات الاختبار النهائي",
+                f"{len(test_preds):,}"
+            )
+       
         if test_metrics:
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
 
-            c1.metric("النموذج المختار", best_name)
+            c1.metric(
+                "النموذج المختار",
+                best_name
+            )
+
             c2.metric(
                 "RMSE",
                 f"{test_metrics['RMSE']:.2f} BOPD"
             )
+
             c3.metric(
                 "MAE",
                 f"{test_metrics['MAE']:.2f} BOPD"
             )
+
+            r2_value = test_metrics.get("R²", np.nan)
+
+            c4.metric(
+                "R²",
+                f"{r2_value:.3f}"
+                if pd.notna(r2_value)
+                else "غير متاح"
+            )
+
+            st.caption(
+                "RMSE وMAE يقيسان حجم أخطاء التنبؤ، والأقل أفضل. "
+                "R² يقيس مدى تفسير النموذج لتباين الإنتاج؛ "
+                "وقد تكون قيمته سالبة إذا كان الأداء ضعيفاً."
+            )
         else:
             st.warning("نتائج الاختبار النهائي غير متاحة.")
+
 
         fig = px.bar(
             metrics,
@@ -813,18 +861,36 @@ elif page == "تدريب ومقارنة النماذج":
         )
         st.plotly_chart(fig, use_container_width=True)
 
+        
         if not test_preds.empty:
-            available_wells = sorted(test_preds["well"].unique())
-            pred_well = st.selectbox(
-                "اختر بئراً لعرض الاختبار النهائي",
-                available_wells
+            available_pairs = (
+                test_preds[["field", "well"]]
+                .drop_duplicates()
+                .sort_values(["field", "well"])
             )
 
+            available_pairs["label"] = (
+                available_pairs["field"].astype(str)
+                + " — "
+                + available_pairs["well"].astype(str)
+            )
+
+            selected_pair = st.selectbox(
+                "اختر الحقل والبئر لعرض الاختبار النهائي",
+                available_pairs["label"].tolist()
+            )
+
+            chosen = available_pairs[
+                available_pairs["label"] == selected_pair
+            ].iloc[0]
+
             p = test_preds[
-                test_preds["well"] == pred_well
+                (test_preds["field"] == chosen["field"])
+                & (test_preds["well"] == chosen["well"])
             ].sort_values("date")
 
             fig = go.Figure()
+
             fig.add_trace(
                 go.Scatter(
                     x=p["date"],
@@ -833,6 +899,7 @@ elif page == "تدريب ومقارنة النماذج":
                     name="الإنتاج الفعلي"
                 )
             )
+
             fig.add_trace(
                 go.Scatter(
                     x=p["date"],
@@ -841,12 +908,14 @@ elif page == "تدريب ومقارنة النماذج":
                     name="الإنتاج المتوقع"
                 )
             )
+
             fig.update_layout(
-                title=f"الإنتاج الفعلي مقابل المتوقع — {pred_well}",
+                title=f"الإنتاج الفعلي مقابل المتوقع — {chosen['field']} — {chosen['well']}",
                 xaxis_title="التاريخ",
                 yaxis_title="الإنتاج (BOPD)",
                 hovermode="x unified"
             )
+
             st.plotly_chart(fig, use_container_width=True)
 
         st.info(
@@ -921,6 +990,12 @@ elif page == "تدريب ومقارنة النماذج":
 
 elif page == "التنبؤ المستقبلي":
     st.subheader("تنبؤ إنتاج البئر للأيام القادمة")
+ 
+    st.warning(
+        "تنبيه هندسي: نتائج التنبؤ تقديرات مبنية على بيانات الإنتاج التاريخية "
+        "وافتراض استمرار نمط البيانات وظروف التشغيل. "
+        "لا تعتبر النتائج ضمانًا للإنتاج الفعلي أو بديلًا عن التقييم الهندسي."
+    )
 
     if not evaluation or not evaluation.get("models"):
         st.error("تعذر تدريب النماذج. تأكد أن لكل بئر بيانات كافية.")
