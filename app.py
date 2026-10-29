@@ -274,16 +274,22 @@ def evaluate_models(df, seed=42):
     test_predictions["predicted_oil_production_bopd"] = test_pred
     test_predictions["model"] = best_name
 
-   fitted = {
-    name: model for name, model in validation_models.items()
-}
+     fitted = {
+        name: model for name, model in validation_models.items()
+    }
 
-if final_model is not None:
-    fitted[best_name] = final_model
+    if final_model is not None:
+        fitted[best_name] = final_model
 
-fitted["Persistence Baseline"] = None
+    fitted["Persistence Baseline"] = None
 
     return metrics, test_predictions, {
+        "models": fitted,
+        "best_name": best_name,
+        "features": FEATURES,
+        "feature_data": data,
+        "test_metrics": test_metrics
+    }
         "models": fitted,
         "best_name": best_name,
         "features": FEATURES,
