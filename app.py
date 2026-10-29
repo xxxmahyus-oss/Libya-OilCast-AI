@@ -274,12 +274,14 @@ def evaluate_models(df, seed=42):
     test_predictions["predicted_oil_production_bopd"] = test_pred
     test_predictions["model"] = best_name
 
-    fitted = {
-        name: model for name, model in validation_models.items()
-    }
+   fitted = {
+    name: model for name, model in validation_models.items()
+}
 
-    if final_model is not None:
-        fitted[best_name] = final_model
+if final_model is not None:
+    fitted[best_name] = final_model
+
+fitted["Persistence Baseline"] = None
 
     return metrics, test_predictions, {
         "models": fitted,
@@ -399,7 +401,13 @@ def forecast_one_well(group, model, horizon):
             "choke_pct":new["choke_pct"], "uptime_pct":new["uptime_pct"],
             "month":new_date.month
         }
-        pred = max(0.0, float(model.predict(pd.DataFrame([feat])[FEATURES])[0]))
+        if model is None:
+    pred = max(0.0, float(y.iloc[-1]))
+else:
+    pred = max(
+        0.0,
+        float(model.predict(pd.DataFrame([feat])[FEATURES])[0])
+    )
         new["oil_production_bopd"] = pred
         result.append({"date":new_date,"field":new["field"],"well":new["well"],
                        "forecast_oil_production_bopd":round(pred,2)})
