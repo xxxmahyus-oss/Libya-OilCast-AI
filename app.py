@@ -725,6 +725,7 @@ st.markdown(f"""
 
 st.warning("تنبيه بحثي: البيانات الافتراضية مصطنعة لأغراض تطوير واختبار البرمجية فقط. لا تستخدم التوقعات لاتخاذ قرارات تشغيلية ميدانية دون التحقق من بيانات حقيقية ومراجعة مهندس مختص.")
 
+
 # تجهيز متغيرات تقييم النماذج
 metrics = pd.DataFrame()
 test_preds = pd.DataFrame()
@@ -735,8 +736,7 @@ if page in [
     "التنبؤ المستقبلي",
     "توقع إنتاج الحقول",
 ]:
-
-with st.spinner("جاري تجهيز خصائص السلاسل الزمنية وتقييم النماذج..."):
+    with st.spinner("جاري تجهيز خصائص السلاسل الزمنية وتقييم النماذج..."):
         metrics, test_preds, evaluation = evaluate_models(df, int(seed))
 
     # إحصائيات البيانات المستخدمة
@@ -746,6 +746,7 @@ with st.spinner("جاري تجهيز خصائص السلاسل الزمنية و
     c1, c2 = st.columns(2)
     c1.metric("عدد الآبار", n_wells)
     c2.metric("عدد الحقول النفطية", n_fields)
+
 # ---------- Pages ----------
 if page == "نظرة عامة":
     total_prod = view_df.groupby("date")["oil_production_bopd"].sum()
