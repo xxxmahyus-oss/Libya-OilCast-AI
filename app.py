@@ -633,8 +633,14 @@ st.markdown(f"""
 st.warning("تنبيه بحثي: البيانات الافتراضية مصطنعة لأغراض تطوير واختبار البرمجية فقط. لا تستخدم التوقعات لاتخاذ قرارات تشغيلية ميدانية دون التحقق من بيانات حقيقية ومراجعة مهندس مختص.")
 
 # Cache evaluation for current dataset
-with st.spinner("جاري تجهيز خصائص السلاسل الزمنية وتقييم النماذج..."):
-    metrics, test_preds, evaluation = evaluate_models(df, int(seed))
+else:
+    metrics = pd.DataFrame()
+    test_preds = pd.DataFrame()
+    evaluation = {}
+
+    if page in ["تدريب ومقارنة النماذج", "التنبؤ المستقبلي"]:
+        with st.spinner("جاري تجهيز خصائص السلاسل الزمنية وتقييم النماذج..."):
+            metrics, test_preds, evaluation = evaluate_models(df, int(seed))
 
 # ---------- Pages ----------
 if page == "نظرة عامة":
