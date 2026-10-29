@@ -1007,9 +1007,10 @@ elif page == "تدريب ومقارنة النماذج":
 
             st.plotly_chart(fig_wf, use_container_width=True)
 
+
 elif page == "التنبؤ المستقبلي":
     st.subheader("تنبؤ إنتاج البئر للأيام القادمة")
- 
+
     st.warning(
         "تنبيه هندسي: نتائج التنبؤ تقديرات مبنية على بيانات الإنتاج التاريخية "
         "وافتراض استمرار نمط البيانات وظروف التشغيل. "
@@ -1018,170 +1019,216 @@ elif page == "التنبؤ المستقبلي":
 
     if not evaluation or not evaluation.get("models"):
         st.error("تعذر تدريب النماذج. تأكد أن لكل بئر بيانات كافية.")
+
     else:
         candidate_models = list(evaluation["models"].keys())
+
         default_model = (
             evaluation["best_name"]
             if evaluation["best_name"] in candidate_models
             else candidate_models[0]
         )
 
-        fields = sorted(df["field"].dropna().astype(str).unique()) 
-        
-        fields = ["كل الحقول"] + fields
+        available_fields = sorted(
+            df["field"].dropna().astype(str).unique().tolist()
+        )
 
-        if not fields:
+        fields = ["كل الحقول"] + available_fields
+
+        if not available_fields:
             st.warning("لا توجد حقول متاحة للتنبؤ.")
+
         else:
-            col1, col2 = st.columns(2)
-
-            with col1:
-                chosen_field = st.selectbox(
-                    "اختر الحقل",
-                    fields,
-                    key="forecast_field"
-                )
-
-            field_data = df[
-                df["field"].astype(str) == chosen_field
-            ].copy()
-
-            available_wells = sorted(
-                field_data["well"].dropna().astype(str).unique()
+            chosen_field = st.selectbox(
+                "اختر الحقل",
+                fields,
+                key="forecast_field"
             )
 
-            with col2:
-                chosen_well = st.selectbox(
+            if chosen_field == "كل الحقول":
+                field_data = df.copy()
+                available_wells = sorted(
+                    field_data["well"].dropna().astype(str).unique().tolist()
+                )
+                well_options = [
+                    f"{field} | {well}"
+                    for field, well in (
+                        field_data[["field", "well"]]
+                        .dropna()
+                        .astype(str)
+                        .drop_duplicates()
+                        .sort_values(["field", "well"])
+                        .itertuples(index=False, name=None)
+                    )
+                ]
+            else:
+                field_data = df[
+                    df["field"].astype(str) == chosen_field
+                ].copy()
+
+                available_wells = sorted(
+                    field_data["well"].dropna().astype(str).unique().tolist()
+                )
+                well_options = available_wells
+
+            if not well_options:
+                st.warning("لا توجد آبار متاحة في هذا الاختيار.")
+
+            else:
+                chosen_well_option = st.selectbox(
                     "اختر البئر",
-                    available_wells,
+                    well_options,
                     key="forecast_well"
                 )
 
-            horizon = st.slider(
-                "أفق التنبؤ (يوم)",
-                7, 90, 30,
-                key="forecast_horizon"
-            )
-
-            chosen_model = st.selectbox(
-                "نموذج التنبؤ",
-                candidate_models,
-                index=candidate_models.index(default_model),
-                key="forecast_model"
-            )
-            
-            run_forecast = st.button(
-                "احسب إنتاج البئر المتوقع",
-                key="run_single_well_forecast"
-            )
-
-
-            history = field_data[
-                field_data["well"].astype(str) == chosen_well
-            ].sort_values("date").copy()
-
-            history = history.drop_duplicates(
-                subset=["date"], keep="last"
-            )
-
-         if run_forecast and len(history) < 30:
-             st.error(
-                    "هذا البئر يحتاج إلى 30 قراءة يومية على الأقل "
-                    "لتكوين خصائص التأخير."
-                )
-            else:
-                forecast = forecast_one_well(
-                    history,
-                    evaluation["models"][chosen_model],
-                    horizon
-                )
-
-                if forecast.empty:
-                    st.error(
-                        "تعذر إنشاء التنبؤ. راجع التواريخ والقراءات "
-                        "والأعمدة التشغيلية للبئر."
+                if chosen_field == "كل الحقول":
+                    chosen_field, chosen_well = chosen_well_option.split(
+                        " | ", 1
                     )
+                    history = df[
+                        (df["field"].astype(str) == chosen_field)
+                        & (df["well"].astype(str) == chosen_well)
+                    ].copy()
                 else:
-                    fig = go.Figure()
+                    chosen_well = chosen_well_option
+                    history = field_data[
+                        field_data["well"].astype(str) == chosen_well
+                    ].copy()
 
-                    recent = history.tail(120)
+                history = history.sort_values("date").drop_duplicates(
+                    subset=["date"], keep="last"
+                )
 
-                    fig.add_trace(go.Scatter(
-                        x=recent["date"],
-                        y=recent["oil_production_bopd"],
-                        mode="lines",
-                        name="التاريخ الفعلي"
-                    ))
+                horizon = st.slider(
+                    "أفق التنبؤ (يوم)",
+                    7, 90, 30,
+                    key="forecast_horizon"
+                )
 
-                    fig.add_trace(go.Scatter(
-                        x=forecast["date"],
-                        y=forecast["forecast_oil_production_bopd"],
-                        mode="lines+markers",
-                        name="الإنتاج المتوقع"
-                    ))
+                chosen_model = st.selectbox(
+                    "نموذج التنبؤ",
+                    candidate_models,
+                    index=candidate_models.index(default_model),
+                    key="forecast_model"
+                )
 
-                    fig.update_layout(
-                        title=(
-                            f"توقع الإنتاج — {chosen_field} / "
-                            f"{chosen_well} باستخدام {chosen_model}"
-                        ),
-                        xaxis_title="التاريخ",
-                        yaxis_title="Oil Production (BOPD)",
-                        hovermode="x unified"
-                    )
+                run_forecast = st.button(
+                    "حساب توقع إنتاج البئر",
+                    key="run_single_well_forecast"
+                )
 
-                    st.plotly_chart(fig, use_container_width=True)
+                # لا نحسب التنبؤ ولا نعرض نتائجه إلا بعد الضغط
+                if run_forecast:
+                    if len(history) < 30:
+                        st.error(
+                            "هذا البئر يحتاج إلى 30 قراءة يومية على الأقل "
+                            "لتكوين خصائص التأخير."
+                        )
 
-                    total = forecast[
-                        "forecast_oil_production_bopd"
-                    ].sum()
+                    else:
+                        forecast = forecast_one_well(
+                            history,
+                            evaluation["models"][chosen_model],
+                            horizon
+                        )
 
-                    avg = forecast[
-                        "forecast_oil_production_bopd"
-                    ].mean()
+                        if forecast.empty:
+                            st.error(
+                                "تعذر إنشاء التنبؤ. راجع التواريخ والقراءات "
+                                "والأعمدة التشغيلية للبئر."
+                            )
 
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric(
-                        "متوسط الإنتاج المتوقع",
-                        f"{avg:,.1f} BOPD"
-                    )
-                    m2.metric(
-                        "مجموع الإنتاج المتوقع",
-                        f"{total:,.1f} برميل"
-                    )
-                    m3.metric(
-                        "فترة التنبؤ",
-                        f"{len(forecast)} يوم"
-                    )
+                        else:
+                            fig = go.Figure()
 
-                    st.dataframe(
-                        forecast,
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                            recent = history.tail(120)
 
-                    safe_field = "".join(
-                        c if c.isalnum() else "_"
-                        for c in chosen_field.lower()
-                    )
-                    safe_well = "".join(
-                        c if c.isalnum() else "_"
-                        for c in chosen_well.lower()
-                    )
+                            fig.add_trace(go.Scatter(
+                                x=recent["date"],
+                                y=recent["oil_production_bopd"],
+                                mode="lines",
+                                name="التاريخ الفعلي"
+                            ))
 
-                    st.download_button(
-                        "تنزيل التنبؤ CSV",
-                        forecast.to_csv(index=False).encode("utf-8-sig"),
-                        file_name=f"forecast_{safe_field}_{safe_well}.csv",
-                        mime="text/csv"
-                    )
+                            fig.add_trace(go.Scatter(
+                                x=forecast["date"],
+                                y=forecast["forecast_oil_production_bopd"],
+                                mode="lines+markers",
+                                name="الإنتاج المتوقع"
+                            ))
 
-                    st.caption(
-                        "التنبؤ تكراري؛ وقد يتراكم عدم اليقين مع زيادة "
-                        "المدة. ظروف التشغيل المستقبلية مفترضة ثابتة "
-                        "عند آخر قراءة متاحة."
-                    )
+                            fig.update_layout(
+                                title=(
+                                    f"توقع الإنتاج — {chosen_field} / "
+                                    f"{chosen_well} باستخدام {chosen_model}"
+                                ),
+                                xaxis_title="التاريخ",
+                                yaxis_title="Oil Production (BOPD)",
+                                hovermode="x unified"
+                            )
 
+                            st.plotly_chart(
+                                fig,
+                                use_container_width=True
+                            )
+
+                            total = forecast[
+                                "forecast_oil_production_bopd"
+                            ].sum()
+
+                            avg = forecast[
+                                "forecast_oil_production_bopd"
+                            ].mean()
+
+                            m1, m2, m3 = st.columns(3)
+
+                            m1.metric(
+                                "متوسط الإنتاج المتوقع",
+                                f"{avg:,.1f} BOPD"
+                            )
+
+                            m2.metric(
+                                "مجموع الإنتاج المتوقع",
+                                f"{total:,.1f} برميل"
+                            )
+
+                            m3.metric(
+                                "فترة التنبؤ",
+                                f"{len(forecast)} يوم"
+                            )
+
+                            st.dataframe(
+                                forecast,
+                                use_container_width=True,
+                                hide_index=True
+                            )
+
+                            safe_field = "".join(
+                                c if c.isalnum() else "_"
+                                for c in chosen_field.lower()
+                            )
+
+                            safe_well = "".join(
+                                c if c.isalnum() else "_"
+                                for c in chosen_well.lower()
+                            )
+
+                            st.download_button(
+                                "تنزيل التنبؤ CSV",
+                                forecast.to_csv(
+                                    index=False
+                                ).encode("utf-8-sig"),
+                                file_name=(
+                                    f"forecast_{safe_field}_{safe_well}.csv"
+                                ),
+                                mime="text/csv"
+                            )
+
+                            st.caption(
+                                "التنبؤ تكراري؛ وقد يتراكم عدم اليقين مع زيادة "
+                                "المدة. ظروف التشغيل المستقبلية مفترضة ثابتة "
+                                "عند آخر قراءة متاحة."
+                            )
 
 elif page == "توقع إنتاج الحقول":
     st.subheader("التنبؤ بإنتاج الحقل بالكامل")
