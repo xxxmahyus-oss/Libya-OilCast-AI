@@ -657,7 +657,20 @@ def make_pdf_report(title, metrics, forecast):
 # ---------- Sidebar ----------
 st.sidebar.title("🛢️ Libya OilCast AI")
 st.sidebar.caption("Oil production forecasting research prototype")
-page = st.sidebar.radio("التنقل", ["نظرة عامة", "تحليل الإنتاج", "تدريب ومقارنة النماذج", "التنبؤ المستقبلي", "البيانات والتصدير", "عن المشروع"])
+
+page = st.sidebar.radio(
+    "التنقل",
+    [
+        "نظرة عامة",
+        "تحليل الإنتاج",
+        "تدريب ومقارنة النماذج",
+        "التنبؤ المستقبلي",
+        "توقع إنتاج الحقول",
+        "البيانات والتصدير",
+        "عن المشروع",
+    ]
+)
+
 st.sidebar.divider()
 st.sidebar.subheader("إعدادات البيانات الافتراضية")
 n_wells = st.sidebar.slider("عدد الآبار الافتراضية", 3, 20, 8)
@@ -1007,7 +1020,9 @@ elif page == "التنبؤ المستقبلي":
             else candidate_models[0]
         )
 
-        fields = sorted(df["field"].dropna().astype(str).unique())
+        fields = sorted(df["field"].dropna().astype(str).unique()) 
+        
+        fields = ["كل الحقول"] + fields
 
         if not fields:
             st.warning("لا توجد حقول متاحة للتنبؤ.")
@@ -1154,6 +1169,234 @@ elif page == "التنبؤ المستقبلي":
                         "المدة. ظروف التشغيل المستقبلية مفترضة ثابتة "
                         "عند آخر قراءة متاحة."
                     )
+
+
+elif page == "توقع إنتاج الحقول":
+    st.subheader("التنبؤ بإنتاج الحقل بالكامل")
+
+    st.warning(
+        "التوقعات تقديرية وتعتمد على البيانات التاريخية "
+        "وافتراض ثبات ظروف التشغيل. لا تمثل ضمانًا للإنتاج الفعلي."
+    )
+
+    if not evaluation or not evaluation.get("models"):
+        st.error("تعذر تدريب النماذج. راجع البيانات أولًا.")
+    else:
+        available_fields = sorted(
+            df["field"].dropna().astype(str).unique().tolist()
+        )
+
+        if not available_fields:
+            st.warning("لا توجد حقول متاحة.")
+        else:
+            col1, col2 = st.columns(2)
+
+            with col1:
+                field_choice = st.selectbox(
+                    "اختر الحقل",
+                    available_fields,
+                    key="field_forecast_field"
+                )
+
+            with col2:
+                horizon_field = st.slider(
+                    "مدة التنبؤ بالأيام",
+                    min_value=7,
+                    max_value=90,
+                    value=30,
+                    key="field_forecast_horizon"
+                )
+
+            candidate_models = list(evaluation["models"].keys())
+            default_model = evaluation["best_name"]
+
+            if default_model not in candidate_models:
+                default_model = candidate_models[0]
+
+            chosen_field_model = st.selectbox(
+                "نموذج التنبؤ",
+                candidate_models,
+                index=candidate_models.index(default_model),
+                key="field_forecast_model"
+            )
+
+            if st.button(
+                "احسب إنتاج الحقل المتوقع",
+                key="run_field_forecast"
+            ):
+                field_data = df[
+                    df["field"].astype(str) == field_choice
+                ].copy()
+
+                all_forecasts = []
+                skipped_wells = []
+
+                model = evaluation["models"][chosen_field_model]
+
+                with st.spinner("جاري حساب توقعات آبار الحقل..."):
+                    for well_name, group in field_data.groupby("well"):
+                        group = group.sort_values("date").copy()
+
+                        if (
+                            group["date"].nunique() < 30
+                            or group["oil_production_bopd"]
+                            .notna().sum() < 30
+                        ):
+                            skipped_wells.append(str(well_name))
+                            continue
+
+                        forecast_part = forecast_one_well(
+                            group,
+                            model,
+                            int(horizon_field)
+                        )
+
+                        if forecast_part.empty:
+                            skipped_wells.append(str(well_name))
+                            continue
+
+                        all_forecasts.append(forecast_part)
+
+                if not all_forecasts:
+                    st.error(
+                        "لم نتمكن من توقع إنتاج أي بئر. "
+                        "تأكد من توفر 30 قراءة صالحة على الأقل لكل بئر."
+                    )
+                else:
+                    well_forecasts = pd.concat(
+                        all_forecasts,
+                        ignore_index=True
+                    )
+
+                    daily_total = (
+                        well_forecasts
+                        .groupby("date", as_index=False)
+                        ["forecast_oil_production_bopd"]
+                        .sum()
+                        .rename(columns={
+                            "forecast_oil_production_bopd":
+                            "total_forecast_bopd"
+                        })
+                        .sort_values("date")
+                    )
+
+                    average_daily = daily_total[
+                        "total_forecast_bopd"
+                    ].mean()
+
+                    total_period = daily_total[
+                        "total_forecast_bopd"
+                    ].sum()
+
+                    st.success(
+                        f"تم التنبؤ لـ "
+                        f"{well_forecasts['well'].nunique()} بئر."
+                    )
+
+                    m1, m2, m3 = st.columns(3)
+
+                    m1.metric(
+                        "متوسط إنتاج الحقل المتوقع",
+                        f"{average_daily:,.1f} BOPD"
+                    )
+
+                    m2.metric(
+                        "إجمالي إنتاج الفترة",
+                        f"{total_period:,.1f} برميل"
+                    )
+
+                    m3.metric(
+                        "الآبار المتوقّع لها",
+                        f"{well_forecasts['well'].nunique()}"
+                    )
+
+                    fig_total = px.line(
+                        daily_total,
+                        x="date",
+                        y="total_forecast_bopd",
+                        markers=True,
+                        title="إجمالي إنتاج الحقل المتوقع يوميًا"
+                    )
+
+                    fig_total.update_layout(
+                        xaxis_title="التاريخ",
+                        yaxis_title="إنتاج الحقل (BOPD)",
+                        hovermode="x unified"
+                    )
+
+                    st.plotly_chart(
+                        fig_total,
+                        use_container_width=True
+                    )
+
+                    fig_wells = px.line(
+                        well_forecasts,
+                        x="date",
+                        y="forecast_oil_production_bopd",
+                        color="well",
+                        title="مقارنة الإنتاج المتوقع بين آبار الحقل"
+                    )
+
+                    fig_wells.update_layout(
+                        xaxis_title="التاريخ",
+                        yaxis_title="إنتاج البئر (BOPD)",
+                        hovermode="x unified"
+                    )
+
+                    st.plotly_chart(
+                        fig_wells,
+                        use_container_width=True
+                    )
+
+                    st.markdown("### إجمالي إنتاج الحقل حسب اليوم")
+
+                    st.dataframe(
+                        daily_total.round(2),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    st.markdown("### توقعات كل بئر")
+
+                    st.dataframe(
+                        well_forecasts.round(2),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    st.download_button(
+                        "تنزيل توقعات كل الآبار CSV",
+                        well_forecasts.to_csv(
+                            index=False
+                        ).encode("utf-8-sig"),
+                        file_name="field_well_forecasts.csv",
+                        mime="text/csv",
+                        key="download_field_wells"
+                    )
+
+                    st.download_button(
+                        "تنزيل إجمالي إنتاج الحقل CSV",
+                        daily_total.to_csv(
+                            index=False
+                        ).encode("utf-8-sig"),
+                        file_name="field_daily_forecast.csv",
+                        mime="text/csv",
+                        key="download_field_total"
+                    )
+
+                    if skipped_wells:
+                        st.warning(
+                            "تم تجاوز الآبار التالية لعدم كفاية "
+                            "البيانات أو تعذر إنشاء التنبؤ: "
+                            + "، ".join(skipped_wells)
+                        )
+
+                    st.caption(
+                        "إجمالي إنتاج الحقل هو مجموع توقعات الآبار "
+                        "التي نجح التنبؤ لها فقط. افتراض ثبات ظروف "
+                        "التشغيل قد لا يعكس الظروف المستقبلية الفعلية."
+                    )
+
 
 
 elif page == "البيانات والتصدير":
