@@ -13,122 +13,216 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 APP_NAME = "Libya OilCast AI"
 st.set_page_config(page_title=APP_NAME, page_icon="🛢️", layout="wide")
 
+
 # ---------- Styling ----------
 st.markdown("""
 <style>
+    :root {
+        --bg-main: #07111f;
+        --bg-panel: #0e2034;
+        --bg-sidebar: #091728;
+        --border-color: #24445f;
+        --accent: #4de2d0;
+        --accent-blue: #38bdf8;
+        --text-main: #e5edf7;
+        --text-muted: #9bb0c5;
+    }
+
     /* Main application */
     .stApp {
-        background: #07111f;
-        color: #e5edf7;
+        background:
+            radial-gradient(
+                ellipse at 85% 0%,
+                rgba(8, 126, 139, 0.12),
+                transparent 38%
+            ),
+            var(--bg-main);
+        color: var(--text-main);
     }
 
     .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 2.5rem;
-        max-width: 1450px;
+        padding-top: 1.7rem;
+        padding-bottom: 3rem;
+        max-width: 1500px;
     }
 
-    /* Main hero */
-    .hero {
-        padding: 2rem;
-        border: 1px solid #1e4562;
-        border-radius: 20px;
-        background: linear-gradient(
-            120deg,
-            #0b1c30 0%,
-            #103b55 60%,
-            #075e66 100%
-        );
-        color: #ffffff;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.20);
+    /* Headings */
+    h1, h2, h3 {
+        color: #f0f7ff !important;
+        font-weight: 750 !important;
+        letter-spacing: -0.3px;
     }
 
-    .hero h1 {
-        margin: 0 0 0.6rem 0;
-        font-size: 2.3rem;
-        font-weight: 800;
-        color: #ffffff;
-    }
-
-    .hero p {
-        margin: 0.3rem 0;
-        color: #c7e8f5;
-        font-size: 1rem;
+    h2 {
+        border-bottom: 1px solid rgba(77, 226, 208, 0.16);
+        padding-bottom: 10px;
     }
 
     /* Sidebar */
     section[data-testid="stSidebar"] {
-        background: #0a1728;
-        border-right: 1px solid #1c344c;
+        background: linear-gradient(
+            180deg,
+            #091728 0%,
+            #0b1d31 100%
+        );
+        border-right: 1px solid #203c55;
     }
 
-    section[data-testid="stSidebar"] * {
-        color: #e5edf7;
+    section[data-testid="stSidebar"] > div {
+        padding-top: 1.5rem;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: #c6d8e9;
     }
 
     /* Metrics */
     div[data-testid="stMetric"] {
-        background: #0e2034;
+        background: linear-gradient(
+            145deg,
+            #10253b,
+            #0c1b2c
+        );
         border: 1px solid #24445f;
+        border-top: 2px solid #168b96;
         border-radius: 15px;
-        padding: 16px;
+        padding: 18px 18px 15px 18px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+        transition: border-color 0.2s ease,
+                    transform 0.2s ease;
+    }
+
+    div[data-testid="stMetric"]:hover {
+        border-color: #2c8e9d;
+        transform: translateY(-2px);
     }
 
     div[data-testid="stMetricLabel"] {
-        color: #a9c4da;
+        color: #a9c4da !important;
     }
 
     div[data-testid="stMetricValue"] {
-        color: #4de2d0;
-        font-weight: 750;
+        color: var(--accent) !important;
+        font-weight: 800;
     }
 
     /* Buttons */
     .stButton > button,
     .stDownloadButton > button {
-        border: 1px solid #20b8c5;
+        border: 1px solid #168b96;
         border-radius: 10px;
-        background: #103b55;
+        background: linear-gradient(
+            120deg,
+            #103b55,
+            #10505b
+        );
         color: #ffffff;
-        font-weight: 650;
-        transition: 0.2s ease;
+        font-weight: 700;
+        min-height: 42px;
+        transition: all 0.2s ease;
     }
 
     .stButton > button:hover,
     .stDownloadButton > button:hover {
-        border-color: #4de2d0;
+        border-color: var(--accent);
         background: #15536a;
         color: #ffffff;
+        box-shadow: 0 4px 16px rgba(32, 184, 197, 0.12);
+    }
+
+    .stButton > button:focus,
+    .stDownloadButton > button:focus {
+        box-shadow: 0 0 0 2px rgba(77, 226, 208, 0.25);
     }
 
     /* Inputs */
     div[data-baseweb="select"] > div,
     div[data-baseweb="input"] > div,
     div[data-baseweb="textarea"] > div {
-        background: #102238;
+        background-color: #102238;
         border-color: #294761;
         border-radius: 9px;
     }
 
-    /* Tables */
+    div[data-baseweb="select"] *,
+    div[data-baseweb="input"] input,
+    div[data-baseweb="textarea"] textarea {
+        color: #e5edf7;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        border-bottom: 1px solid #24445f;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        background: #0e2034;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 16px;
+    }
+
+    .stTabs [aria-selected="true"] {
+        border-bottom: 2px solid var(--accent);
+        color: var(--accent) !important;
+    }
+
+    /* Data tables */
     div[data-testid="stDataFrame"] {
         border: 1px solid #24445f;
         border-radius: 12px;
         overflow: hidden;
     }
 
-    /* Notes */
-    .small-note {
-        font-size: 0.85rem;
-        color: #9bb0c5;
+    /* Expanders */
+    details[data-testid="stExpander"] {
+        background: rgba(14, 32, 52, 0.65);
+        border: 1px solid #24445f;
+        border-radius: 12px;
     }
 
+    /* Alerts */
+    div[data-testid="stAlert"] {
+        border-radius: 12px;
+    }
+
+    /* Links */
+    a {
+        color: var(--accent-blue) !important;
+    }
+
+    /* Captions */
+    .stCaption,
+    [data-testid="stCaptionContainer"] {
+        color: var(--text-muted) !important;
+    }
+
+    /* Separators */
     hr {
         border-color: #20364c;
     }
+
+    /* Small reusable note */
+    .small-note {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    /* Responsive spacing */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 1rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        h1 {
+            font-size: 1.8rem !important;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ---------- Synthetic data ----------
 @st.cache_data(show_spinner=False)
