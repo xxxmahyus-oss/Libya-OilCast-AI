@@ -1046,21 +1046,30 @@ elif page == "التنبؤ المستقبلي":
             )
 
             field_data = df[
-    df["field"].astype(str) == chosen_field
-].copy()
+                df["field"].astype(str) == chosen_field
+            ].copy()
 
-available_wells = sorted(
-    field_data["well"].dropna().astype(str).unique().tolist()
-)
+            available_wells = sorted(
+                field_data["well"].dropna().astype(str).unique().tolist()
+            )
 
-if not available_wells:
-    st.warning("لا توجد آبار متاحة في هذا الحقل.")
-else:
-    chosen_well = st.selectbox(
-        "اختر البئر",
-        available_wells,
-        key="forecast_well"
-    )
+            if not available_wells:
+                st.warning("لا توجد آبار متاحة في هذا الحقل.")
+
+            else:
+                chosen_well = st.selectbox(
+                    "اختر البئر",
+                    available_wells,
+                    key="forecast_well"
+                )
+
+                history = field_data[
+                    field_data["well"].astype(str) == chosen_well
+                ].copy()
+
+                history = history.sort_values("date").drop_duplicates(
+                    subset=["date"], keep="last"
+                )
 
     history = field_data[
         field_data["well"].astype(str) == chosen_well
