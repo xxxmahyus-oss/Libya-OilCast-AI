@@ -373,49 +373,71 @@ def walk_forward_validation(df, seed=42, n_splits=3):
     return pd.DataFrame(predictions)
 
 
-
 def forecast_one_well(group, model, horizon):
     hist = group.sort_values("date").copy().reset_index(drop=True)
+
     if len(hist) < 31:
         return pd.DataFrame()
+
     result = []
+
     for step in range(horizon):
         last_date = hist["date"].max()
         new_date = last_date + pd.Timedelta(days=1)
+
         y = hist["oil_production_bopd"].astype(float)
+
         new = {
-            "date":new_date,
-            "field":hist["field"].iloc[-1],
-            "well":hist["well"].iloc[-1],
-            "oil_production_bopd":np.nan,
-            "water_cut_pct":float(hist["water_cut_pct"].iloc[-1]),
-            "pressure_psi":float(hist["pressure_psi"].iloc[-1]),
-            "choke_pct":float(hist["choke_pct"].iloc[-1]),
-            "uptime_pct":float(hist["uptime_pct"].iloc[-1]),
+            "date": new_date,
+            "field": hist["field"].iloc[-1],
+            "well": hist["well"].iloc[-1],
+            "oil_production_bopd": np.nan,
+            "water_cut_pct": float(hist["water_cut_pct"].iloc[-1]),
+            "pressure_psi": float(hist["pressure_psi"].iloc[-1]),
+            "choke_pct": float(hist["choke_pct"].iloc[-1]),
+            "uptime_pct": float(hist["uptime_pct"].iloc[-1]),
         }
-        # Feature vector uses only information available up to the forecast origin.
+
         feat = {
-            "day_index":int((new_date-hist["date"].min()).days),
-            "lag_1":float(y.iloc[-1]), "lag_7":float(y.iloc[-7]),
-            "lag_14":float(y.iloc[-14]), "lag_30":float(y.iloc[-30]),
-            "rolling_mean_7":float(y.iloc[-7:].mean()),
-            "rolling_mean_30":float(y.iloc[-30:].mean()),
-            "water_cut_pct":new["water_cut_pct"], "pressure_psi":new["pressure_psi"],
-            "choke_pct":new["choke_pct"], "uptime_pct":new["uptime_pct"],
-            "month":new_date.month
+            "day_index": int((new_date - hist["date"].min()).days),
+            "lag_1": float(y.iloc[-1]),
+            "lag_7": float(y.iloc[-7]),
+            "lag_14": float(y.iloc[-14]),
+            "lag_30": float(y.iloc[-30]),
+            "rolling_mean_7": float(y.iloc[-7:].mean()),
+            "rolling_mean_30": float(y.iloc[-30:].mean()),
+            "water_cut_pct": new["water_cut_pct"],
+            "pressure_psi": new["pressure_psi"],
+            "choke_pct": new["choke_pct"],
+            "uptime_pct": new["uptime_pct"],
+            "month": new_date.month,
         }
+
         if model is None:
-    pred = max(0.0, float(y.iloc[-1]))
-else:
-    pred = max(
-        0.0,
-        float(model.predict(pd.DataFrame([feat])[FEATURES])[0])
-    )
+            pred = max(0.0, float(y.iloc[-1]))
+        else:
+            pred = max(
+                0.0,
+                float(model.predict(pd.DataFrame([feat])[FEATURES])[0])
+            )
+
         new["oil_production_bopd"] = pred
-        result.append({"date":new_date,"field":new["field"],"well":new["well"],
-                       "forecast_oil_production_bopd":round(pred,2)})
-        hist = pd.concat([hist, pd.DataFrame([new])], ignore_index=True)
+
+        result.append({
+            "date": new_date,
+            "field": new["field"],
+            "well": new["well"],
+            "forecast_oil_production_bopd": round(pred, 2),
+        })
+
+        hist = pd.concat(
+            [hist, pd.DataFrame([new])],
+            ignore_index=True
+        )
+
     return pd.DataFrame(result)
+
+
 
 def make_pdf_report(title, metrics, forecast):
     try:
