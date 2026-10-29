@@ -160,6 +160,9 @@ def model_bank(seed):
         "Hist Gradient Boosting": HistGradientBoostingRegressor(max_iter=180, learning_rate=0.07, random_state=seed)
     }
 @st.cache_resource(show_spinner=False)
+
+
+@st.cache_resource(show_spinner=False)
 def evaluate_models(df, seed=42):
     feature_frames = []
 
@@ -177,7 +180,6 @@ def evaluate_models(df, seed=42):
     if len(data) < 60:
         return pd.DataFrame(), data, {}
 
-    # Split chronologically into training, validation, and final test sets.
     dates = np.sort(data["date"].unique())
 
     if len(dates) < 10:
@@ -197,51 +199,52 @@ def evaluate_models(df, seed=42):
     if len(train) < 20 or len(val) < 5 or len(test) < 5:
         return pd.DataFrame(), data, {}
 
-    X_train, y_train = train[FEATURES], train["oil_production_bopd"]
-    X_val, y_val = val[FEATURES], val["oil_production_bopd"]
+    X_train = train[FEATURES]
+    y_train = train["oil_production_bopd"]
+    X_val = val[FEATURES]
+    y_val = val["oil_production_bopd"]
 
     rows = []
     validation_scores = {}
     validation_models = {}
 
-    # Persistence baseline: predict using the latest observed production.
     baseline_val = val["lag_1"].to_numpy()
 
     rows.append({
         "Model": "Persistence Baseline",
         "MAE": mean_absolute_error(y_val, baseline_val),
         "RMSE": np.sqrt(mean_squared_error(y_val, baseline_val)),
-        "R²": r2_score(y_val, baseline_val) if y_val.nunique() > 1 else np.nan
+        "R²": r2_score(y_val, baseline_val)
+        if y_val.nunique() > 1 else np.nan
     })
 
     for name, model in model_bank(seed).items():
         model.fit(X_train, y_train)
         pred_val = np.maximum(0, model.predict(X_val))
 
-        mae = mean_absolute_error(y_val, pred_val)
-        rmse = np.sqrt(mean_squared_error(y_val, pred_val))
-        r2 = r2_score(y_val, pred_val) if y_val.nunique() > 1 else np.nan
-
         rows.append({
             "Model": name,
-            "MAE": mae,
-            "RMSE": rmse,
-            "R²": r2
+            "MAE": mean_absolute_error(y_val, pred_val),
+            "RMSE": np.sqrt(mean_squared_error(y_val, pred_val)),
+            "R²": r2_score(y_val, pred_val)
+            if y_val.nunique() > 1 else np.nan
         })
 
-        validation_scores[name] = rmse
+        validation_scores[name] = rows[-1]["RMSE"]
         validation_models[name] = model
 
-    metrics = pd.DataFrame(rows).sort_values("RMSE").reset_index(drop=True)
+    metrics = (
+        pd.DataFrame(rows)
+        .sort_values("RMSE")
+        .reset_index(drop=True)
+    )
 
-    # Select the model using validation data only.
     baseline_rmse = rows[0]["RMSE"]
     best_name = min(validation_scores, key=validation_scores.get)
 
-    if baseline_rmse < validation_scores[best_name]:
+    if baseline_rmse <= validation_scores[best_name]:
         best_name = "Persistence Baseline"
 
-    # Refit the selected ML model using training + validation data.
     if best_name != "Persistence Baseline":
         final_model = model_bank(seed)[best_name]
         training_data = pd.concat([train, val], ignore_index=True)
@@ -252,7 +255,6 @@ def evaluate_models(df, seed=42):
     else:
         final_model = None
 
-    # Evaluate once on the untouched final test period.
     X_test = test[FEATURES]
     y_test = test["oil_production_bopd"]
 
@@ -264,7 +266,8 @@ def evaluate_models(df, seed=42):
     test_metrics = {
         "MAE": mean_absolute_error(y_test, test_pred),
         "RMSE": np.sqrt(mean_squared_error(y_test, test_pred)),
-        "R²": r2_score(y_test, test_pred) if y_test.nunique() > 1 else np.nan
+        "R²": r2_score(y_test, test_pred)
+        if y_test.nunique() > 1 else np.nan
     }
 
     test_predictions = test[
@@ -274,7 +277,7 @@ def evaluate_models(df, seed=42):
     test_predictions["predicted_oil_production_bopd"] = test_pred
     test_predictions["model"] = best_name
 
-     fitted = {
+    fitted = {
         name: model for name, model in validation_models.items()
     }
 
@@ -284,12 +287,6 @@ def evaluate_models(df, seed=42):
     fitted["Persistence Baseline"] = None
 
     return metrics, test_predictions, {
-        "models": fitted,
-        "best_name": best_name,
-        "features": FEATURES,
-        "feature_data": data,
-        "test_metrics": test_metrics
-    }
         "models": fitted,
         "best_name": best_name,
         "features": FEATURES,
