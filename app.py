@@ -748,27 +748,196 @@ if page in [
     c2.metric("عدد الحقول النفطية", n_fields)
 
 # ---------- Pages ----------
+
 if page == "نظرة عامة":
-    total_prod = view_df.groupby("date")["oil_production_bopd"].sum()
-    latest = view_df.sort_values("date").groupby("well").tail(1)
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("عدد الآبار", f"{view_df['well'].nunique():,}")
-    c2.metric("متوسط الإنتاج اليومي", f"{view_df['oil_production_bopd'].mean():,.1f} BOPD")
-    c3.metric("إجمالي آخر يوم", f"{total_prod.iloc[-1]:,.1f} BOPD" if len(total_prod) else "—")
-    c4.metric("أيام البيانات", f"{view_df['date'].nunique():,}")
-    left,right = st.columns([1.6,1])
-    with left:
-        trend = view_df.groupby("date", as_index=False)["oil_production_bopd"].sum()
-        fig = px.line(trend, x="date", y="oil_production_bopd", title="اتجاه الإنتاج اليومي — الآبار المختارة")
-        fig.update_layout(xaxis_title="التاريخ", yaxis_title="إنتاج النفط (برميل/يوم)", hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
-    with right:
-        by_well = view_df.groupby("well", as_index=False)["oil_production_bopd"].mean().sort_values("oil_production_bopd", ascending=False)
-        fig2 = px.bar(by_well, x="well", y="oil_production_bopd", title="متوسط الإنتاج حسب البئر")
-        fig2.update_layout(xaxis_title="البئر", yaxis_title="متوسط BOPD")
-        st.plotly_chart(fig2, use_container_width=True)
-    st.subheader("آخر القراءات")
-    st.dataframe(view_df.sort_values("date", ascending=False).head(15), use_container_width=True, hide_index=True)
+    st.markdown("""
+    <div style="
+        background: linear-gradient(120deg, #071526, #123653, #087E8B);
+        padding: 30px 28px;
+        border-radius: 18px;
+        border: 1px solid rgba(100, 210, 220, 0.25);
+        margin-bottom: 24px;
+    ">
+        <div style="color:#67E8F9; font-size:13px; letter-spacing:3px;">
+            PETROLEUM ENGINEERING • AI FORECASTING
+        </div>
+        <h1 style="color:#FFFFFF; margin:12px 0 8px 0; font-size:34px;">
+            Libya OilCast AI
+        </h1>
+        <p style="color:#D5E7F2; font-size:16px; margin-bottom:0;">
+            منصة ذكية لتحليل إنتاج النفط ومقارنة نماذج التعلم الآلي
+            والتنبؤ بالإنتاج المستقبلي للحقول الليبية.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if view_df.empty:
+        st.warning("لا توجد بيانات متاحة للعرض. غيّر مرشحات البيانات أو ارفع ملفًا يحتوي على قراءات إنتاج.")
+    else:
+        dashboard_data = view_df.copy()
+        dashboard_data["date"] = pd.to_datetime(
+            dashboard_data["date"], errors="coerce"
+        )
+        dashboard_data["oil_production_bopd"] = pd.to_numeric(
+            dashboard_data["oil_production_bopd"], errors="coerce"
+        )
+        dashboard_data = dashboard_data.dropna(
+            subset=["date", "oil_production_bopd", "well"]
+        )
+
+        if dashboard_data.empty:
+            st.warning("لا توجد قراءات إنتاج صالحة بعد تنظيف البيانات.")
+        else:
+            total_prod = (
+                dashboard_data.groupby("date")["oil_production_bopd"]
+                .sum()
+                .sort_index()
+            )
+
+            latest_date = dashboard_data["date"].max()
+            latest_total = total_prod.get(latest_date, 0)
+
+            well_count = dashboard_data["well"].nunique()
+            field_count = (
+                dashboard_data["field"].nunique()
+                if "field" in dashboard_data.columns
+                else 0
+            )
+            avg_prod = dashboard_data["oil_production_bopd"].mean()
+            date_count = dashboard_data["date"].nunique()
+
+            st.markdown("""
+            <div style="font-size:20px; font-weight:700; margin:8px 0 14px 0;">
+                مؤشرات الإنتاج الرئيسية
+            </div>
+            """, unsafe_allow_html=True)
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            c1.metric("عدد الآبار", f"{well_count:,}")
+            c2.metric("عدد الحقول", f"{field_count:,}")
+            c3.metric("متوسط الإنتاج", f"{avg_prod:,.1f} BOPD")
+            c4.metric("إنتاج أحدث تاريخ", f"{latest_total:,.1f} BOPD")
+
+            st.caption(
+                f"آخر تاريخ متاح: {latest_date:%Y-%m-%d} "
+                f"| عدد الأيام المسجلة: {date_count:,}"
+            )
+
+            st.divider()
+
+            left, right = st.columns([1.6, 1])
+
+            with left:
+                st.markdown("### اتجاه الإنتاج")
+
+                trend = (
+                    dashboard_data.groupby("date", as_index=False)
+                    ["oil_production_bopd"].sum()
+                    .sort_values("date")
+                )
+
+                fig = px.area(
+                    trend,
+                    x="date",
+                    y="oil_production_bopd",
+                    title="إجمالي الإنتاج اليومي للآبار المختارة",
+                    labels={
+                        "date": "التاريخ",
+                        "oil_production_bopd": "الإنتاج (BOPD)"
+                    }
+                )
+
+                fig.update_traces(
+                    line=dict(color="#0891B2", width=2.5),
+                    fillcolor="rgba(8,145,178,0.16)"
+                )
+
+                fig.update_layout(
+                    height=390,
+                    hovermode="x unified",
+                    margin=dict(l=15, r=15, t=65, b=15),
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    legend=dict(orientation="h")
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    key="overview_production_trend"
+                )
+
+            with right:
+                st.markdown("### مقارنة الآبار")
+
+                by_well = (
+                    dashboard_data.groupby("well", as_index=False)
+                    ["oil_production_bopd"].mean()
+                    .sort_values("oil_production_bopd", ascending=True)
+                    .tail(12)
+                )
+
+                fig2 = px.bar(
+                    by_well,
+                    x="oil_production_bopd",
+                    y="well",
+                    orientation="h",
+                    labels={
+                        "well": "البئر",
+                        "oil_production_bopd": "متوسط الإنتاج (BOPD)"
+                    }
+                )
+
+                fig2.update_traces(
+                    marker_color="#0E9F9A",
+                    marker_line_width=0
+                )
+
+                fig2.update_layout(
+                    height=390,
+                    margin=dict(l=10, r=15, t=25, b=15),
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)"
+                )
+
+                st.plotly_chart(
+                    fig2,
+                    use_container_width=True,
+                    key="overview_well_comparison"
+                )
+
+            st.divider()
+
+            st.markdown("### أحدث قراءات الإنتاج")
+
+            recent = (
+                dashboard_data.sort_values("date", ascending=False)
+                .head(15)
+                .copy()
+            )
+
+            st.dataframe(
+                recent,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.download_button(
+                "تنزيل أحدث القراءات CSV",
+                data=recent.to_csv(index=False).encode("utf-8-sig"),
+                file_name="libya_oilcast_recent_production.csv",
+                mime="text/csv",
+                key="overview_recent_download"
+            )
+
+            st.caption(
+                "Libya OilCast AI | التحليلات مبنية على البيانات المتاحة "
+                "والآبار المحددة في المرشحات."
+            )
+
 
 elif page == "تحليل الإنتاج":
     st.subheader("تحليل الإنتاج والمؤشرات التشغيلية")
