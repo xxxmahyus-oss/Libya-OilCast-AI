@@ -1084,8 +1084,8 @@ elif page == "التنبؤ المستقبلي":
                 subset=["date"], keep="last"
             )
 
-            if len(history) < 30:
-                st.error(
+         if run_forecast and len(history) < 30:
+             st.error(
                     "هذا البئر يحتاج إلى 30 قراءة يومية على الأقل "
                     "لتكوين خصائص التأخير."
                 )
