@@ -730,8 +730,13 @@ metrics = pd.DataFrame()
 test_preds = pd.DataFrame()
 evaluation = {}
 
-if page in ["تدريب ومقارنة النماذج", "التنبؤ المستقبلي"]:
-    with st.spinner("جاري تجهيز خصائص السلاسل الزمنية وتقييم النماذج..."):
+if page in [
+    "تدريب ومقارنة النماذج",
+    "التنبؤ المستقبلي",
+    "توقع إنتاج الحقول",
+]:
+
+with st.spinner("جاري تجهيز خصائص السلاسل الزمنية وتقييم النماذج..."):
         metrics, test_preds, evaluation = evaluate_models(df, int(seed))
 
     # إحصائيات البيانات المستخدمة
