@@ -260,8 +260,7 @@ def model_bank(seed):
         "Extra Trees": ExtraTreesRegressor(n_estimators=100, min_samples_leaf=2, random_state=seed, n_jobs=1),
         "Hist Gradient Boosting": HistGradientBoostingRegressor(max_iter=180, learning_rate=0.07, random_state=seed)
     }
-@st.cache_resource(show_spinner=False)
-
+    
 
 @st.cache_resource(show_spinner=False)
 def evaluate_models(df, seed=42):
@@ -293,9 +292,9 @@ def evaluate_models(df, seed=42):
     val_dates = dates[train_cut:val_cut]
     test_dates = dates[val_cut:]
 
-    train = data[data["date"].isin(train_dates)]
-    val = data[data["date"].isin(val_dates)]
-    test = data[data["date"].isin(test_dates)]
+    train = data[data["date"].isin(train_dates)].copy()
+    val = data[data["date"].isin(val_dates)].copy()
+    test = data[data["date"].isin(test_dates)].copy()
 
     if len(train) < 20 or len(val) < 5 or len(test) < 5:
         return pd.DataFrame(), data, {}
@@ -305,33 +304,49 @@ def evaluate_models(df, seed=42):
     X_val = val[FEATURES]
     y_val = val["oil_production_bopd"]
 
+    def calculate_metrics(actual, predicted):
+        actual = np.asarray(actual, dtype=float)
+        predicted = np.asarray(predicted, dtype=float)
+
+        result = {
+            "MAE": mean_absolute_error(actual, predicted),
+            "RMSE": float(np.sqrt(mean_squared_error(actual, predicted))),
+            "R²": (
+                r2_score(actual, predicted)
+                if len(actual) > 1 and np.unique(actual).size > 1
+                else np.nan
+            )
+        }
+        return result
+
     rows = []
     validation_scores = {}
     validation_models = {}
 
-    baseline_val = val["lag_1"].to_numpy()
+    baseline_val = np.maximum(0, val["lag_1"].to_numpy(dtype=float))
 
+    baseline_metrics = calculate_metrics(y_val, baseline_val)
     rows.append({
         "Model": "Persistence Baseline",
-        "MAE": mean_absolute_error(y_val, baseline_val),
-        "RMSE": np.sqrt(mean_squared_error(y_val, baseline_val)),
-        "R²": r2_score(y_val, baseline_val)
-        if y_val.nunique() > 1 else np.nan
+        **baseline_metrics
     })
+    validation_scores["Persistence Baseline"] = baseline_metrics["RMSE"]
 
     for name, model in model_bank(seed).items():
         model.fit(X_train, y_train)
-        pred_val = np.maximum(0, model.predict(X_val))
+
+        pred_val = np.maximum(
+            0, model.predict(X_val)
+        )
+
+        model_metrics = calculate_metrics(y_val, pred_val)
 
         rows.append({
             "Model": name,
-            "MAE": mean_absolute_error(y_val, pred_val),
-            "RMSE": np.sqrt(mean_squared_error(y_val, pred_val)),
-            "R²": r2_score(y_val, pred_val)
-            if y_val.nunique() > 1 else np.nan
+            **model_metrics
         })
 
-        validation_scores[name] = rows[-1]["RMSE"]
+        validation_scores[name] = model_metrics["RMSE"]
         validation_models[name] = model
 
     metrics = (
@@ -340,36 +355,32 @@ def evaluate_models(df, seed=42):
         .reset_index(drop=True)
     )
 
-    baseline_rmse = rows[0]["RMSE"]
     best_name = min(validation_scores, key=validation_scores.get)
 
-    if baseline_rmse <= validation_scores[best_name]:
-        best_name = "Persistence Baseline"
+    training_data = pd.concat([train, val], ignore_index=True)
 
-    if best_name != "Persistence Baseline":
+    if best_name == "Persistence Baseline":
+        final_model = None
+    else:
         final_model = model_bank(seed)[best_name]
-        training_data = pd.concat([train, val], ignore_index=True)
         final_model.fit(
             training_data[FEATURES],
             training_data["oil_production_bopd"]
         )
-    else:
-        final_model = None
 
     X_test = test[FEATURES]
     y_test = test["oil_production_bopd"]
 
     if best_name == "Persistence Baseline":
-        test_pred = test["lag_1"].to_numpy()
+        test_pred = np.maximum(
+            0, test["lag_1"].to_numpy(dtype=float)
+        )
     else:
-        test_pred = np.maximum(0, final_model.predict(X_test))
+        test_pred = np.maximum(
+            0, final_model.predict(X_test)
+        )
 
-    test_metrics = {
-        "MAE": mean_absolute_error(y_test, test_pred),
-        "RMSE": np.sqrt(mean_squared_error(y_test, test_pred)),
-        "R²": r2_score(y_test, test_pred)
-        if y_test.nunique() > 1 else np.nan
-    }
+    test_metrics = calculate_metrics(y_test, test_pred)
 
     test_predictions = test[
         ["date", "field", "well", "oil_production_bopd"]
@@ -378,9 +389,7 @@ def evaluate_models(df, seed=42):
     test_predictions["predicted_oil_production_bopd"] = test_pred
     test_predictions["model"] = best_name
 
-    fitted = {
-        name: model for name, model in validation_models.items()
-    }
+    fitted = dict(validation_models)
 
     if final_model is not None:
         fitted[best_name] = final_model
@@ -392,9 +401,15 @@ def evaluate_models(df, seed=42):
         "best_name": best_name,
         "features": FEATURES,
         "feature_data": data,
-        "test_metrics": test_metrics
+        "test_metrics": test_metrics,
+        "validation_scores": validation_scores,
+        "split_dates": {
+            "train_end": pd.Timestamp(train_dates[-1]),
+            "validation_end": pd.Timestamp(val_dates[-1]),
+            "test_start": pd.Timestamp(test_dates[0]),
+            "test_end": pd.Timestamp(test_dates[-1])
+        }
     }
-
 
 def walk_forward_validation(df, seed=42, n_splits=3):
     feature_frames = []
@@ -475,18 +490,66 @@ def walk_forward_validation(df, seed=42, n_splits=3):
 
 
 def forecast_one_well(group, model, horizon):
-    hist = group.sort_values("date").copy().reset_index(drop=True)
+    hist = (
+        group.sort_values("date")
+        .drop_duplicates(subset=["date"], keep="last")
+        .copy()
+        .reset_index(drop=True)
+    )
 
-    if len(hist) < 31:
+    required = [
+        "date",
+        "well",
+        "field",
+        "oil_production_bopd",
+        "water_cut_pct",
+        "pressure_psi",
+        "choke_pct",
+        "uptime_pct",
+    ]
+
+    if any(col not in hist.columns for col in required):
         return pd.DataFrame()
+
+    hist["date"] = pd.to_datetime(hist["date"], errors="coerce")
+    hist["oil_production_bopd"] = pd.to_numeric(
+        hist["oil_production_bopd"], errors="coerce"
+    )
+
+    hist = hist.dropna(
+        subset=["date", "oil_production_bopd"]
+    ).reset_index(drop=True)
+
+    if len(hist) < 30 or horizon < 1:
+        return pd.DataFrame()
+
+    if hist["date"].nunique() < 30:
+        return pd.DataFrame()
+
+    numeric_columns = [
+        "water_cut_pct",
+        "pressure_psi",
+        "choke_pct",
+        "uptime_pct",
+    ]
+
+    for col in numeric_columns:
+        hist[col] = pd.to_numeric(hist[col], errors="coerce")
+        hist[col] = hist[col].ffill().bfill()
+
+        if hist[col].isna().all():
+            hist[col] = 0.0
 
     result = []
 
-    for step in range(horizon):
+    for step in range(int(horizon)):
         last_date = hist["date"].max()
         new_date = last_date + pd.Timedelta(days=1)
 
         y = hist["oil_production_bopd"].astype(float)
+
+        if len(y) < 30:
+            break
 
         new = {
             "date": new_date,
@@ -500,7 +563,9 @@ def forecast_one_well(group, model, horizon):
         }
 
         feat = {
-            "day_index": int((new_date - hist["date"].min()).days),
+            "day_index": int(
+                (new_date - hist["date"].min()).days
+            ),
             "lag_1": float(y.iloc[-1]),
             "lag_7": float(y.iloc[-7]),
             "lag_14": float(y.iloc[-14]),
@@ -517,9 +582,10 @@ def forecast_one_well(group, model, horizon):
         if model is None:
             pred = max(0.0, float(y.iloc[-1]))
         else:
+            feature_row = pd.DataFrame([feat])[FEATURES]
             pred = max(
                 0.0,
-                float(model.predict(pd.DataFrame([feat])[FEATURES])[0])
+                float(model.predict(feature_row)[0])
             )
 
         new["oil_production_bopd"] = pred
@@ -529,6 +595,7 @@ def forecast_one_well(group, model, horizon):
             "field": new["field"],
             "well": new["well"],
             "forecast_oil_production_bopd": round(pred, 2),
+            "scenario": "ثبات ظروف التشغيل الحالية",
         })
 
         hist = pd.concat(
@@ -537,7 +604,6 @@ def forecast_one_well(group, model, horizon):
         )
 
     return pd.DataFrame(result)
-
 
 
 def make_pdf_report(title, metrics, forecast):
@@ -855,39 +921,164 @@ elif page == "تدريب ومقارنة النماذج":
 
 elif page == "التنبؤ المستقبلي":
     st.subheader("تنبؤ إنتاج البئر للأيام القادمة")
+
     if not evaluation or not evaluation.get("models"):
         st.error("تعذر تدريب النماذج. تأكد أن لكل بئر بيانات كافية.")
     else:
         candidate_models = list(evaluation["models"].keys())
-        default_model = evaluation["best_name"] if evaluation["best_name"] in candidate_models else candidate_models[0]
-        col1,col2 = st.columns(2)
-        with col1:
-            chosen_well = st.selectbox("البئر المراد التنبؤ له", wells if wells else sorted(df["well"].unique()))
-        with col2:
-            horizon = st.slider("أفق التنبؤ (يوم)", 7, 90, 30)
-        chosen_model = st.selectbox("نموذج التنبؤ", candidate_models, index=candidate_models.index(default_model))
-        history = df[df["well"]==chosen_well].sort_values("date")
-        if len(history) < 31:
-            st.error("هذا البئر يحتاج إلى 31 قراءة يومية على الأقل لتكوين خصائص التأخير.")
+        default_model = (
+            evaluation["best_name"]
+            if evaluation["best_name"] in candidate_models
+            else candidate_models[0]
+        )
+
+        fields = sorted(df["field"].dropna().astype(str).unique())
+
+        if not fields:
+            st.warning("لا توجد حقول متاحة للتنبؤ.")
         else:
-            forecast = forecast_one_well(history, evaluation["models"][chosen_model], horizon)
-            fig = go.Figure()
-            recent = history.tail(120)
-            fig.add_trace(go.Scatter(x=recent["date"], y=recent["oil_production_bopd"], mode="lines", name="التاريخ الفعلي"))
-            fig.add_trace(go.Scatter(x=forecast["date"], y=forecast["forecast_oil_production_bopd"], mode="lines+markers", name="التوقع"))
-            fig.update_layout(title=f"توقع الإنتاج — {chosen_well} باستخدام {chosen_model}",
-                              xaxis_title="التاريخ", yaxis_title="Oil Production (BOPD)", hovermode="x unified")
-            st.plotly_chart(fig, use_container_width=True)
-            total = forecast["forecast_oil_production_bopd"].sum()
-            avg = forecast["forecast_oil_production_bopd"].mean()
-            m1,m2,m3 = st.columns(3)
-            m1.metric("متوسط الإنتاج المتوقع", f"{avg:,.1f} BOPD")
-            m2.metric("مجموع القيم اليومية المتوقعة", f"{total:,.1f} برميل")
-            m3.metric("فترة التنبؤ", f"{horizon} يوم")
-            st.dataframe(forecast, use_container_width=True, hide_index=True)
-            st.download_button("تنزيل التنبؤ CSV", forecast.to_csv(index=False).encode("utf-8-sig"),
-                               file_name=f"forecast_{chosen_well.lower()}.csv", mime="text/csv")
-            st.caption("هذا توقع أحادي الخطوة تكراري؛ عدم اليقين يتراكم كلما طال أفق التنبؤ، والخصائص التشغيلية المستقبلية تُثبَّت عند آخر قراءة.")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                chosen_field = st.selectbox(
+                    "اختر الحقل",
+                    fields,
+                    key="forecast_field"
+                )
+
+            field_data = df[
+                df["field"].astype(str) == chosen_field
+            ].copy()
+
+            available_wells = sorted(
+                field_data["well"].dropna().astype(str).unique()
+            )
+
+            with col2:
+                chosen_well = st.selectbox(
+                    "اختر البئر",
+                    available_wells,
+                    key="forecast_well"
+                )
+
+            horizon = st.slider(
+                "أفق التنبؤ (يوم)",
+                7, 90, 30,
+                key="forecast_horizon"
+            )
+
+            chosen_model = st.selectbox(
+                "نموذج التنبؤ",
+                candidate_models,
+                index=candidate_models.index(default_model),
+                key="forecast_model"
+            )
+
+            history = field_data[
+                field_data["well"].astype(str) == chosen_well
+            ].sort_values("date").copy()
+
+            history = history.drop_duplicates(
+                subset=["date"], keep="last"
+            )
+
+            if len(history) < 30:
+                st.error(
+                    "هذا البئر يحتاج إلى 30 قراءة يومية على الأقل "
+                    "لتكوين خصائص التأخير."
+                )
+            else:
+                forecast = forecast_one_well(
+                    history,
+                    evaluation["models"][chosen_model],
+                    horizon
+                )
+
+                if forecast.empty:
+                    st.error(
+                        "تعذر إنشاء التنبؤ. راجع التواريخ والقراءات "
+                        "والأعمدة التشغيلية للبئر."
+                    )
+                else:
+                    fig = go.Figure()
+
+                    recent = history.tail(120)
+
+                    fig.add_trace(go.Scatter(
+                        x=recent["date"],
+                        y=recent["oil_production_bopd"],
+                        mode="lines",
+                        name="التاريخ الفعلي"
+                    ))
+
+                    fig.add_trace(go.Scatter(
+                        x=forecast["date"],
+                        y=forecast["forecast_oil_production_bopd"],
+                        mode="lines+markers",
+                        name="الإنتاج المتوقع"
+                    ))
+
+                    fig.update_layout(
+                        title=(
+                            f"توقع الإنتاج — {chosen_field} / "
+                            f"{chosen_well} باستخدام {chosen_model}"
+                        ),
+                        xaxis_title="التاريخ",
+                        yaxis_title="Oil Production (BOPD)",
+                        hovermode="x unified"
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    total = forecast[
+                        "forecast_oil_production_bopd"
+                    ].sum()
+
+                    avg = forecast[
+                        "forecast_oil_production_bopd"
+                    ].mean()
+
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric(
+                        "متوسط الإنتاج المتوقع",
+                        f"{avg:,.1f} BOPD"
+                    )
+                    m2.metric(
+                        "مجموع الإنتاج المتوقع",
+                        f"{total:,.1f} برميل"
+                    )
+                    m3.metric(
+                        "فترة التنبؤ",
+                        f"{len(forecast)} يوم"
+                    )
+
+                    st.dataframe(
+                        forecast,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    safe_field = "".join(
+                        c if c.isalnum() else "_"
+                        for c in chosen_field.lower()
+                    )
+                    safe_well = "".join(
+                        c if c.isalnum() else "_"
+                        for c in chosen_well.lower()
+                    )
+
+                    st.download_button(
+                        "تنزيل التنبؤ CSV",
+                        forecast.to_csv(index=False).encode("utf-8-sig"),
+                        file_name=f"forecast_{safe_field}_{safe_well}.csv",
+                        mime="text/csv"
+                    )
+
+                    st.caption(
+                        "التنبؤ تكراري؛ وقد يتراكم عدم اليقين مع زيادة "
+                        "المدة. ظروف التشغيل المستقبلية مفترضة ثابتة "
+                        "عند آخر قراءة متاحة."
+                    )
 
 
 elif page == "البيانات والتصدير":
@@ -933,24 +1124,19 @@ elif page == "البيانات والتصدير":
                 hide_index=True
             )
 
-            st.markdown("### 2. فحص الأعمدة")
+            st.markdown("### 2. تحديد الأعمدة")
+
             detected = detect_oil_columns(candidate)
-
-            st.markdown("### 2. تحديد الأعمدة تلقائياً")
-
             date_options = ["— اختر العمود —"] + list(candidate.columns)
             production_options = ["— اختر العمود —"] + list(candidate.columns)
 
             date_default = (
                 date_options.index(detected["date"])
-                if detected.get("date") in candidate.columns
-                else 0
+                if detected.get("date") in candidate.columns else 0
             )
-
             production_default = (
                 production_options.index(detected["oil_production_bopd"])
-                if detected.get("oil_production_bopd") in candidate.columns
-                else 0
+                if detected.get("oil_production_bopd") in candidate.columns else 0
             )
 
             date_col = st.selectbox(
@@ -972,8 +1158,7 @@ elif page == "البيانات والتصدير":
                 ["بدون"] + list(candidate.columns),
                 index=(
                     1 + list(candidate.columns).index(detected["well"])
-                    if detected.get("well") in candidate.columns
-                    else 0
+                    if detected.get("well") in candidate.columns else 0
                 ),
                 key="detected_well_column"
             )
@@ -983,8 +1168,7 @@ elif page == "البيانات والتصدير":
                 ["بدون"] + list(candidate.columns),
                 index=(
                     1 + list(candidate.columns).index(detected["field"])
-                    if detected.get("field") in candidate.columns
-                    else 0
+                    if detected.get("field") in candidate.columns else 0
                 ),
                 key="detected_field_column"
             )
@@ -992,63 +1176,18 @@ elif page == "البيانات والتصدير":
             if date_col != "— اختر العمود —" and production_col != "— اختر العمود —":
                 st.success("تم تحديد عمود التاريخ وعمود الإنتاج.")
 
-                st.markdown("### 3. فحص البيانات")
-
-                if st.button(
-                    "اعتماد البيانات واستخدامها في المشروع",
-                    type="primary"
-                ):
-                    cleaned = candidate.copy()
-
-                    cleaned["date"] = pd.to_datetime(
-                        cleaned[date_col], errors="coerce"
-                    )
-
-                    cleaned["oil_production_bopd"] = pd.to_numeric(
-                        cleaned[production_col], errors="coerce"
-                    )
-
-                    if well_col != "بدون":
-                        cleaned["well"] = cleaned[well_col].astype(str)
-
-                    if field_col != "بدون":
-                        cleaned["field"] = cleaned[field_col].astype(str)
-
-                    cleaned = cleaned.dropna(
-                        subset=["date", "oil_production_bopd"]
-                    )
-
-                    cleaned = cleaned[
-                        cleaned["oil_production_bopd"] >= 0
-                    ]
-
-                    if cleaned.empty:
-                        st.error("لم نجد بيانات صالحة للاستخدام.")
-                    else:
-                        st.session_state.uploaded_data = cleaned
-                        st.session_state.use_uploaded_data = True
-                
-                        st.success("تم اعتماد البيانات بنجاح.")
-                        st.rerun()
-
-            else:
-                st.warning("اختر عمود التاريخ وعمود إنتاج النفط للمتابعة.")
-
                 st.markdown("### 3. فحص جودة البيانات")
 
                 quality = pd.DataFrame({
                     "العمود": candidate.columns,
                     "نوع البيانات": [
-                        str(candidate[c].dtype)
-                        for c in candidate.columns
+                        str(candidate[c].dtype) for c in candidate.columns
                     ],
                     "القيم المفقودة": [
-                        int(candidate[c].isna().sum())
-                        for c in candidate.columns
+                        int(candidate[c].isna().sum()) for c in candidate.columns
                     ],
                     "القيم الفريدة": [
-                        int(candidate[c].nunique())
-                        for c in candidate.columns
+                        int(candidate[c].nunique()) for c in candidate.columns
                     ]
                 })
 
@@ -1058,93 +1197,68 @@ elif page == "البيانات والتصدير":
                     hide_index=True
                 )
 
-                try:
-                    parsed_dates = pd.to_datetime(
-                        candidate["date"],
-                        errors="coerce"
-                    )
-                    production = pd.to_numeric(
-                        candidate["oil_production_bopd"],
-                        errors="coerce"
-                    )
+                parsed_dates = pd.to_datetime(
+                    candidate[date_col], errors="coerce"
+                )
+                production = pd.to_numeric(
+                    candidate[production_col], errors="coerce"
+                )
 
-                    invalid_dates = int(parsed_dates.isna().sum())
-                    invalid_production = int(
-                        production.isna().sum()
-                    )
-                    negative_production = int(
-                        (production < 0).sum()
-                    )
+                invalid_dates = int(parsed_dates.isna().sum())
+                invalid_production = int(production.isna().sum())
+                negative_production = int((production < 0).sum())
+                duplicate_rows = int(candidate.duplicated().sum())
 
-                    duplicate_rows = int(
-                        candidate.duplicated().sum()
-                    )
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("تواريخ غير صالحة", invalid_dates)
+                c2.metric("إنتاج غير رقمي أو مفقود", invalid_production)
+                c3.metric("إنتاج سالب", negative_production)
+                c4.metric("صفوف مكررة", duplicate_rows)
 
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("تواريخ غير صالحة", invalid_dates)
-                    c2.metric(
-                        "إنتاج غير رقمي أو مفقود",
-                        invalid_production
+                if invalid_dates or invalid_production or negative_production:
+                    st.warning(
+                        "توجد قيم غير صالحة. سيتم استبعاد القراءات "
+                        "ذات التاريخ أو الإنتاج غير الصالح، والإنتاج السالب."
                     )
-                    c3.metric(
-                        "إنتاج سالب",
-                        negative_production
-                    )
-                    c4.metric("صفوف مكررة", duplicate_rows)
+                else:
+                    st.success("اجتازت البيانات الفحوص الأساسية.")
 
-                    if (
-                        invalid_dates
-                        or invalid_production
-                        or negative_production
-                    ):
-                        st.warning(
-                            "توجد مشكلات في البيانات. "
-                            "سيتم استبعاد التواريخ والإنتاج غير "
-                            "الصالحين، لكن راجع القيم السالبة "
-                            "والبيانات المفقودة قبل اعتماد النتائج."
-                        )
+                if st.button(
+                    "اعتماد البيانات واستخدامها في المشروع",
+                    type="primary"
+                ):
+                    cleaned = candidate.copy()
+
+                    cleaned["date"] = parsed_dates
+                    cleaned["oil_production_bopd"] = production
+
+                    if well_col != "بدون":
+                        cleaned["well"] = cleaned[well_col].astype(str)
+                    elif "well" not in cleaned.columns:
+                        cleaned["well"] = "Well-01"
+
+                    if field_col != "بدون":
+                        cleaned["field"] = cleaned[field_col].astype(str)
+                    elif "field" not in cleaned.columns:
+                        cleaned["field"] = "Imported Field"
+
+                    cleaned = cleaned.dropna(
+                        subset=["date", "oil_production_bopd"]
+                    )
+                    cleaned = cleaned[
+                        cleaned["oil_production_bopd"] >= 0
+                    ]
+
+                    if cleaned.empty:
+                        st.error("لا توجد قراءات صالحة بعد التنظيف.")
                     else:
-                        st.success(
-                            "اجتازت التواريخ وقيم الإنتاج "
-                            "الفحوص الأساسية."
-                        )
+                        st.session_state.uploaded_data = cleaned
+                        st.session_state.use_uploaded_data = True
+                        st.success("تم اعتماد البيانات بنجاح.")
+                        st.rerun()
 
-                    if st.button(
-                        "اعتماد البيانات واستخدامها في المشروع",
-                        type="primary"
-                    ):
-                        cleaned = candidate.copy()
-                        cleaned["date"] = parsed_dates
-                        cleaned["oil_production_bopd"] = production
-
-                        cleaned = cleaned.dropna(
-                            subset=[
-                                "date",
-                                "oil_production_bopd"
-                            ]
-                        )
-
-                        cleaned = cleaned[
-                            cleaned["oil_production_bopd"] >= 0
-                        ]
-
-                        if cleaned.empty:
-                            st.error(
-                                "لا توجد قراءات صالحة بعد التنظيف."
-                            )
-                        else:
-                            st.session_state.uploaded_data = cleaned
-                            st.session_state.use_uploaded_data = True
-                            st.success(
-                                "تم اعتماد البيانات. "
-                                "أعد تشغيل التطبيق إذا لم تتحدث "
-                                "الصفحات الأخرى تلقائياً."
-                            )
-                            st.rerun()
-
-                except Exception as exc:
-                    st.error(f"تعذر فحص البيانات: {exc}")
-
+            else:
+                st.info("اختر عمود التاريخ وعمود إنتاج النفط لعرض فحص الجودة.")
         except Exception as exc:
             st.error(
                 f"تعذر قراءة الملف. تأكد من سلامته وتنسيقه: {exc}"
