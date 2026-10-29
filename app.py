@@ -1033,7 +1033,7 @@ elif page == "التنبؤ المستقبلي":
             df["field"].dropna().astype(str).unique().tolist()
         )
 
-        fields = ["كل الحقول"] + available_fields
+        fields = available_fields
 
         if not available_fields:
             st.warning("لا توجد حقول متاحة للتنبؤ.")
@@ -1045,22 +1045,30 @@ elif page == "التنبؤ المستقبلي":
                 key="forecast_field"
             )
 
-            if chosen_field == "كل الحقول":
-                field_data = df.copy()
-                available_wells = sorted(
-                    field_data["well"].dropna().astype(str).unique().tolist()
-                )
-                well_options = [
-                    f"{field} | {well}"
-                    for field, well in (
-                        field_data[["field", "well"]]
-                        .dropna()
-                        .astype(str)
-                        .drop_duplicates()
-                        .sort_values(["field", "well"])
-                        .itertuples(index=False, name=None)
-                    )
-                ]
+            field_data = df[
+    df["field"].astype(str) == chosen_field
+].copy()
+
+available_wells = sorted(
+    field_data["well"].dropna().astype(str).unique().tolist()
+)
+
+if not available_wells:
+    st.warning("لا توجد آبار متاحة في هذا الحقل.")
+else:
+    chosen_well = st.selectbox(
+        "اختر البئر",
+        available_wells,
+        key="forecast_well"
+    )
+
+    history = field_data[
+        field_data["well"].astype(str) == chosen_well
+    ].copy()
+
+    history = history.sort_values("date").drop_duplicates(
+        subset=["date"], keep="last"
+    )
             else:
                 field_data = df[
                     df["field"].astype(str) == chosen_field
