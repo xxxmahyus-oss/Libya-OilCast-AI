@@ -16,16 +16,117 @@ st.set_page_config(page_title=APP_NAME, page_icon="🛢️", layout="wide")
 # ---------- Styling ----------
 st.markdown("""
 <style>
-    .block-container {padding-top: 1.4rem; padding-bottom: 2rem;}
-    .hero {
-        padding: 1.25rem 1.5rem; border-radius: 18px;
-        background: linear-gradient(120deg, #102a43 0%, #155e75 65%, #0f766e 100%);
-        color: white; margin-bottom: 1rem;
+    /* Main application */
+    .stApp {
+        background: #07111f;
+        color: #e5edf7;
     }
-    .hero h1 {margin: 0 0 .35rem 0; font-size: 2rem;}
-    .hero p {margin: 0; color: #d9f3f4;}
-    .small-note {font-size: .85rem; color: #64748b;}
-    div[data-testid="stMetric"] {border: 1px solid rgba(128,128,128,.22); padding: 12px; border-radius: 12px;}
+
+    .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 2.5rem;
+        max-width: 1450px;
+    }
+
+    /* Main hero */
+    .hero {
+        padding: 2rem;
+        border: 1px solid #1e4562;
+        border-radius: 20px;
+        background: linear-gradient(
+            120deg,
+            #0b1c30 0%,
+            #103b55 60%,
+            #075e66 100%
+        );
+        color: #ffffff;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.20);
+    }
+
+    .hero h1 {
+        margin: 0 0 0.6rem 0;
+        font-size: 2.3rem;
+        font-weight: 800;
+        color: #ffffff;
+    }
+
+    .hero p {
+        margin: 0.3rem 0;
+        color: #c7e8f5;
+        font-size: 1rem;
+    }
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background: #0a1728;
+        border-right: 1px solid #1c344c;
+    }
+
+    section[data-testid="stSidebar"] * {
+        color: #e5edf7;
+    }
+
+    /* Metrics */
+    div[data-testid="stMetric"] {
+        background: #0e2034;
+        border: 1px solid #24445f;
+        border-radius: 15px;
+        padding: 16px;
+    }
+
+    div[data-testid="stMetricLabel"] {
+        color: #a9c4da;
+    }
+
+    div[data-testid="stMetricValue"] {
+        color: #4de2d0;
+        font-weight: 750;
+    }
+
+    /* Buttons */
+    .stButton > button,
+    .stDownloadButton > button {
+        border: 1px solid #20b8c5;
+        border-radius: 10px;
+        background: #103b55;
+        color: #ffffff;
+        font-weight: 650;
+        transition: 0.2s ease;
+    }
+
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
+        border-color: #4de2d0;
+        background: #15536a;
+        color: #ffffff;
+    }
+
+    /* Inputs */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="textarea"] > div {
+        background: #102238;
+        border-color: #294761;
+        border-radius: 9px;
+    }
+
+    /* Tables */
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #24445f;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    /* Notes */
+    .small-note {
+        font-size: 0.85rem;
+        color: #9bb0c5;
+    }
+
+    hr {
+        border-color: #20364c;
+    }
 </style>
 """, unsafe_allow_html=True)
 
