@@ -1069,6 +1069,12 @@ elif page == "التنبؤ المستقبلي":
                 index=candidate_models.index(default_model),
                 key="forecast_model"
             )
+            
+            run_forecast = st.button(
+                "احسب إنتاج البئر المتوقع",
+                key="run_single_well_forecast"
+            )
+
 
             history = field_data[
                 field_data["well"].astype(str) == chosen_well
