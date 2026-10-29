@@ -837,27 +837,66 @@ if page in [
 
 if page == "نظرة عامة":
 
+    
     st.markdown(
         """
         <div style="margin-bottom: 8px;">
-            <div style="color: #16B8B0; font-size: 12px;
-                font-weight: 800; letter-spacing: 3px; margin-bottom: 10px;">
+
+            <div style="
+                color: #16B8B0;
+                font-size: 12px;
+                font-weight: 800;
+                letter-spacing: 3px;
+                margin-bottom: 10px;
+            ">
                 PETROLEUM ENGINEERING · AI ANALYTICS
             </div>
-            <h1 style="color: #E6F4FF; font-size: 42px; margin-bottom: 10px;">
+
+            <h1 style="
+                color: #E6F4FF;
+                font-size: 42px;
+                font-weight: 850;
+                margin: 0 0 18px 0;
+            ">
                 Libya OilCast AI
             </h1>
-            <h2 style="color: #38CFC5; font-size: 25px; margin-bottom: 18px;">
-                منصة ليبيا للتنبؤ بإنتاج النفط بالذكاء الاصطناعي
+
+            <h2 style="
+                color: #38CFC5;
+                font-size: 25px;
+                font-weight: 750;
+                line-height: 1.8;
+                margin: 0 0 8px 0;
+            ">
+                التنبؤ بإنتاج النفط في الحقول النفطية الليبية باستخدام التعلم الآلي
             </h2>
-            <p style="color: #B8CADB; font-size: 16px; line-height: 1.9;">
-                منصة تحليلية لتطوير ومقارنة نماذج التعلم الآلي،
-                وتحليل بيانات الآبار، والتنبؤ بإنتاج الحقول النفطية الليبية.
+
+            <h3 style="
+                color: #B8CADB;
+                font-size: 18px;
+                font-weight: 600;
+                line-height: 1.6;
+                margin: 0 0 18px 0;
+            ">
+                Machine Learning-Based Forecasting of Oil Production in Libyan Oilfields
+            </h3>
+
+            <p style="
+                color: #B8CADB;
+                font-size: 15px;
+                line-height: 1.9;
+                margin: 0;
+                max-width: 850px;
+            ">
+                منصة بحثية لتحليل بيانات الآبار، ومقارنة نماذج التعلم الآلي،
+                والتنبؤ بمعدلات إنتاج النفط في الحقول الليبية.
             </p>
+
         </div>
         """,
         unsafe_allow_html=True
     )
+
 
     if view_df.empty:
         st.warning("لا توجد بيانات متاحة للعرض.")
