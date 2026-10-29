@@ -809,13 +809,71 @@ selected_well = st.sidebar.selectbox("البئر", ["كل الآبار"] + wells
 view_df = filtered if selected_well == "كل الآبار" else filtered[filtered["well"] == selected_well]
 st.sidebar.caption(f"مصدر البيانات الحالي: {data_source}")
 
-st.markdown(f"""
-<div class="hero">
-  <h1>🛢️ {APP_NAME}</h1>
-  <p>Machine Learning-Based Forecasting of Oil Production in Libyan Oilfields</p>
-  <p>منصة بحثية لتصور بيانات الإنتاج ومقارنة نماذج التنبؤ.</p>
+
+st.markdown("""
+<div style="
+    position: relative;
+    overflow: hidden;
+    padding: 32px 30px;
+    border-radius: 20px;
+    border: 1px solid #24516b;
+    background: linear-gradient(115deg, #081525 0%, #10334c 58%, #075e66 100%);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+    margin-bottom: 18px;
+">
+    <div style="
+        color: #65e6dc;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 2.5px;
+        margin-bottom: 12px;
+    ">
+        PETROLEUM ENGINEERING • ARTIFICIAL INTELLIGENCE
+    </div>
+
+    <div style="
+        color: #ffffff;
+        font-size: clamp(27px, 4vw, 39px);
+        font-weight: 800;
+        line-height: 1.25;
+        margin-bottom: 8px;
+    ">
+        Libya OilCast AI
+    </div>
+
+    <div style="
+        color: #c7e8f5;
+        font-size: 21px;
+        font-weight: 650;
+        margin-bottom: 16px;
+    ">
+        ليبيا أويل كاست للذكاء الاصطناعي
+    </div>
+
+    <div style="
+        color: #e2edf7;
+        font-size: 15px;
+        line-height: 1.9;
+        max-width: 850px;
+    ">
+        منصة بحثية لتحليل إنتاج النفط ومقارنة نماذج التعلم الآلي
+        والتنبؤ بإنتاج الحقول النفطية الليبية.
+    </div>
+
+    <div style="
+        margin-top: 20px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(200,235,245,0.22);
+        color: #a9d7e3;
+        font-size: 12px;
+        letter-spacing: 0.4px;
+    ">
+        OIL PRODUCTION ANALYTICS &nbsp; • &nbsp;
+        MACHINE LEARNING FORECASTING
+    </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 st.warning("تنبيه بحثي: البيانات الافتراضية مصطنعة لأغراض تطوير واختبار البرمجية فقط. لا تستخدم التوقعات لاتخاذ قرارات تشغيلية ميدانية دون التحقق من بيانات حقيقية ومراجعة مهندس مختص.")
 
@@ -844,27 +902,7 @@ if page in [
 # ---------- Pages ----------
 
 if page == "نظرة عامة":
-    st.markdown("""
-    <div style="
-        background: linear-gradient(120deg, #071526, #123653, #087E8B);
-        padding: 30px 28px;
-        border-radius: 18px;
-        border: 1px solid rgba(100, 210, 220, 0.25);
-        margin-bottom: 24px;
-    ">
-        <div style="color:#67E8F9; font-size:13px; letter-spacing:3px;">
-            PETROLEUM ENGINEERING • AI FORECASTING
-        </div>
-        <h1 style="color:#FFFFFF; margin:12px 0 8px 0; font-size:34px;">
-            Libya OilCast AI
-        </h1>
-        <p style="color:#D5E7F2; font-size:16px; margin-bottom:0;">
-            منصة ذكية لتحليل إنتاج النفط ومقارنة نماذج التعلم الآلي
-            والتنبؤ بالإنتاج المستقبلي للحقول الليبية.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
+    
     if view_df.empty:
         st.warning("لا توجد بيانات متاحة للعرض. غيّر مرشحات البيانات أو ارفع ملفًا يحتوي على قراءات إنتاج.")
     else:
